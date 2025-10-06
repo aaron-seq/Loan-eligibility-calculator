@@ -1,7 +1,7 @@
-requirements.txt
-Core libraries for the web application and machine learning model
-Flask==2.0.1
-pymysql==1.0.2
-numpy==1.21.2
-pandas==1.3.3
-scikit-learn==0.24.2
+Flask==3.0.0
+Werkzeug==3.0.1
+numpy==1.24.3
+pandas==2.0.3
+scikit-learn==1.3.0
+gunicorn==21.2.0
+python-dotenv==1.0.0
