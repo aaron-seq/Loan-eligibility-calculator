@@ -1,4 +1,3 @@
-<!-- templates/home.html -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,12 +8,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         body { font-family: 'Inter', sans-serif; }
-        .form-label {
-            @apply block text-sm font-medium text-gray-700 mb-1;
-        }
-        .form-input, .form-select {
-            @apply mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm;
-        }
+        .form-label { @apply block text-sm font-medium text-gray-700 mb-1; }
+        .form-input, .form-select { @apply mt-1 block w-full py-2 px-3 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm; }
     </style>
 </head>
 <body class="bg-gray-50">
@@ -41,7 +36,7 @@
                     Fill in your details below to get a prediction.
                 </p>
             </div>
-            <form class="mt-8" action="/predict" method="post">
+            <form class="mt-8" action="/api/predict" method="post">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <!-- Personal Information -->
                     <div>
@@ -136,9 +131,6 @@
                     </button>
                 </div>
             </form>
-            {% if prediction_text %}
-            <p class="mt-4 text-center text-red-500">{{ prediction_text }}</p>
-            {% endif %}
         </div>
     </div>
 </body>
