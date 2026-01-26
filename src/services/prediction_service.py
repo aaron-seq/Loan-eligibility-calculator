@@ -1,328 +1,358 @@
-"""Prediction Service - Handles ML prediction logic
+"""Prediction Service - ML Business Logic
 
-This service encapsulates all machine learning prediction logic.
-Separated from controllers to enable independent testing and reuse.
+Handles loan eligibility prediction logic separate from HTTP layer.
+Pure business logic with comprehensive validation and error handling.
 """
 
-import os
-import pickle
-from typing import Dict, Any, Optional
 import numpy as np
 import pandas as pd
-import sqlite3
+from typing import Dict, Any, Optional
+from datetime import datetime
 
-from src.exceptions import (
-    ModelNotAvailableError,
-    PredictionError,
-    ValidationError,
-)
-from src.logger import get_logger
-from src.models.schemas import LoanPredictionRequest, PredictionResponse
+from src.utils.logger import get_logger
+from src.utils.exceptions import ValidationError, PredictionError, ModelNotAvailableError
+from src.repositories.prediction_repository import PredictionRepository
+from src.ml.model_loader import ModelLoader
 
 logger = get_logger(__name__)
 
 
 class PredictionService:
-    """Service for loan eligibility predictions"""
+    """Service for handling loan eligibility predictions"""
 
-    def __init__(self, db_connection_factory, model_path: str):
+    # Business rules for validation
+    MIN_INCOME = 0
+    MAX_INCOME = 100000000  # 10 Crores
+    MIN_LOAN_AMOUNT = 1000
+    MAX_LOAN_AMOUNT = 50000000  # 5 Crores
+    MIN_LOAN_TENURE = 12  # months
+    MAX_LOAN_TENURE = 480  # 40 years
+    MIN_CIBIL_SCORE = 300
+    MAX_CIBIL_SCORE = 900
+
+    def __init__(
+        self,
+        prediction_repo: PredictionRepository,
+        model_loader: ModelLoader,
+    ):
         """Initialize prediction service
         
         Args:
-            db_connection_factory: Context manager for database connections
-            model_path: Path to ML model files directory
+            prediction_repo: Repository for storing predictions
+            model_loader: ML model loader
         """
-        self.db_connection_factory = db_connection_factory
-        self.model_path = model_path
-        self.model = None
-        self.scaler = None
-        self._load_models()
-
-    def _load_models(self):
-        """Load ML models with comprehensive error handling
-        
-        Models are loaded once during initialization to avoid repeated I/O.
-        If models fail to load, predictions will be unavailable.
-        """
-        try:
-            model_file = os.path.join(self.model_path, "loan_eligibility_model.pkl")
-            scaler_file = os.path.join(self.model_path, "feature_scaler.pkl")
-
-            if not os.path.exists(model_file) or not os.path.exists(scaler_file):
-                logger.error(
-                    f"Model files not found in {self.model_path}. "
-                    "Prediction service will be unavailable."
-                )
-                return
-
-            with open(model_file, "rb") as f:
-                self.model = pickle.load(f)
-
-            with open(scaler_file, "rb") as f:
-                self.scaler = pickle.load(f)
-
-            logger.info("ML models loaded successfully")
-
-        except Exception as e:
-            logger.error(f"Failed to load ML models: {e}", exc_info=True)
-            self.model = None
-            self.scaler = None
-
-    def is_available(self) -> bool:
-        """Check if prediction service is available
-        
-        Returns:
-            True if models are loaded and ready
-        """
-        return self.model is not None and self.scaler is not None
+        self.prediction_repo = prediction_repo
+        self.model_loader = model_loader
 
     def predict_loan_eligibility(
-        self, user_id: str, request: LoanPredictionRequest
-    ) -> PredictionResponse:
-        """Generate loan eligibility prediction
-        
-        Business Rules:
-        - Applicant income must be positive
-        - Loan amount must be reasonable relative to income
-        - Credit history heavily influences decision
-        - CIBIL score is a strong predictor
+        self, user_id: str, loan_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Predict loan eligibility for a user
         
         Args:
-            user_id: User making the prediction request
-            request: Validated loan prediction request
+            user_id: User making the prediction
+            loan_data: Loan application data
             
         Returns:
-            PredictionResponse with decision and confidence
+            Prediction result with confidence score
             
         Raises:
-            ModelNotAvailableError: If ML models are not loaded
+            ValidationError: If input validation fails
+            ModelNotAvailableError: If ML model is not loaded
             PredictionError: If prediction fails
-            ValidationError: If business rules are violated
         """
-        if not self.is_available():
-            logger.error("Prediction requested but models not available")
-            raise ModelNotAvailableError(
-                "Prediction service is currently unavailable. Please try again later."
-            )
+        logger.info(f"Starting loan prediction for user: {user_id}")
 
-        logger.info(f"Processing prediction request for user: {user_id}")
+        # Validate inputs
+        self._validate_loan_data(loan_data)
 
-        # Validate business rules
-        self._validate_loan_request(request)
+        # Check model availability
+        if not self.model_loader.is_model_loaded():
+            logger.error("ML model not available for prediction")
+            raise ModelNotAvailableError("Prediction service temporarily unavailable")
 
         try:
-            # Feature engineering
-            features = self._engineer_features(request)
+            # Engineer features
+            features = self._engineer_features(loan_data)
 
-            # Create feature vector in correct order
-            feature_vector = self._create_feature_vector(features)
+            # Create feature dataframe
+            feature_df = self._create_feature_dataframe(features)
 
-            # Scale and predict
-            scaled_features = self.scaler.transform(feature_vector)
-            prediction = self.model.predict(scaled_features)
-            prediction_proba = self.model.predict_proba(scaled_features)
+            # Scale features
+            scaled_features = self.model_loader.scale_features(feature_df)
 
-            # Format response
-            decision = "APPROVED" if prediction[0] == 1 else "REJECTED"
-            confidence = float(prediction_proba[0][prediction[0]] * 100)
+            # Generate prediction
+            prediction = self.model_loader.predict(scaled_features)
+            probabilities = self.model_loader.predict_proba(scaled_features)
 
-            result = PredictionResponse(
-                prediction_result=decision,
-                confidence_score=round(confidence, 2),
-                message=f"Loan application {decision.lower()} with {confidence:.1f}% confidence",
+            # Format result
+            result = self._format_prediction_result(prediction, probabilities)
+
+            # Save prediction to database
+            prediction_record = self._save_prediction(
+                user_id=user_id,
+                loan_data=loan_data,
+                features=features,
+                result=result,
             )
-
-            # Save prediction to database for audit trail
-            self._save_prediction(user_id, request, result)
 
             logger.info(
-                f"Prediction completed for user {user_id}: {decision} ({confidence:.2f}%)"
+                f"Prediction completed successfully for user: {user_id}, "
+                f"Result: {result['decision']}, Confidence: {result['confidence']}"
             )
-            return result
 
-        except (ModelNotAvailableError, ValidationError):
-            raise
+            return {
+                "prediction_id": prediction_record.id,
+                "decision": result["decision"],
+                "confidence": result["confidence"],
+                "risk_level": result["risk_level"],
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+
         except Exception as e:
-            logger.error(f"Prediction failed for user {user_id}: {e}", exc_info=True)
-            raise PredictionError("Failed to generate prediction. Please try again.")
+            logger.error(f"Prediction error for user {user_id}: {str(e)}")
+            raise PredictionError(f"Failed to generate prediction: {str(e)}")
 
-    def _validate_loan_request(self, request: LoanPredictionRequest):
-        """Validate business rules for loan request
+    def _validate_loan_data(self, data: Dict[str, Any]) -> None:
+        """Validate loan application data
         
-        Pydantic handles type validation, this handles business logic validation.
+        Raises:
+            ValidationError: If validation fails
         """
-        # Income validation
-        if request.applicant_income <= 0:
-            raise ValidationError("Applicant income must be positive")
+        errors = []
 
-        if request.coapplicant_income < 0:
-            raise ValidationError("Co-applicant income cannot be negative")
+        # Required fields
+        required_fields = [
+            "first_name",
+            "last_name",
+            "applicant_income",
+            "loan_amount",
+            "loan_tenure",
+        ]
 
-        # Loan amount validation
-        if request.loan_amount <= 0:
-            raise ValidationError("Loan amount must be positive")
+        for field in required_fields:
+            if field not in data or data[field] is None:
+                errors.append(f"{field} is required")
 
-        if request.loan_amount_term <= 0:
-            raise ValidationError("Loan term must be positive")
+        if errors:
+            raise ValidationError("; ".join(errors))
 
-        # Business rule: Loan-to-income ratio check
-        total_income = request.applicant_income + request.coapplicant_income
-        loan_to_income_ratio = request.loan_amount / total_income if total_income > 0 else float('inf')
-        
-        if loan_to_income_ratio > 10:
-            logger.warning(
-                f"High loan-to-income ratio detected: {loan_to_income_ratio:.2f}"
+        # Validate numeric ranges
+        applicant_income = float(data.get("applicant_income", 0))
+        coapplicant_income = float(data.get("coapplicant_income", 0))
+        loan_amount = float(data.get("loan_amount", 0))
+        loan_tenure = float(data.get("loan_tenure", 0))
+        cibil_score = int(data.get("cibil_score", 300))
+
+        if not (self.MIN_INCOME <= applicant_income <= self.MAX_INCOME):
+            errors.append(
+                f"Applicant income must be between {self.MIN_INCOME} and {self.MAX_INCOME}"
             )
-            # Note: Not raising error, but logging for monitoring
 
-        # CIBIL score validation
-        if not (300 <= request.cibil_score <= 900):
-            raise ValidationError("CIBIL score must be between 300 and 900")
+        if coapplicant_income < self.MIN_INCOME:
+            errors.append(f"Co-applicant income cannot be negative")
 
-        # Credit history must be binary
-        if request.credit_history not in [0, 1]:
-            raise ValidationError("Credit history must be 0 or 1")
+        if not (self.MIN_LOAN_AMOUNT <= loan_amount <= self.MAX_LOAN_AMOUNT):
+            errors.append(
+                f"Loan amount must be between {self.MIN_LOAN_AMOUNT} and {self.MAX_LOAN_AMOUNT}"
+            )
 
-    def _engineer_features(self, request: LoanPredictionRequest) -> Dict[str, float]:
-        """Engineer features for ML model
+        if not (self.MIN_LOAN_TENURE <= loan_tenure <= self.MAX_LOAN_TENURE):
+            errors.append(
+                f"Loan tenure must be between {self.MIN_LOAN_TENURE} and {self.MAX_LOAN_TENURE} months"
+            )
+
+        if not (self.MIN_CIBIL_SCORE <= cibil_score <= self.MAX_CIBIL_SCORE):
+            errors.append(
+                f"CIBIL score must be between {self.MIN_CIBIL_SCORE} and {self.MAX_CIBIL_SCORE}"
+            )
+
+        if errors:
+            raise ValidationError("; ".join(errors))
+
+    def _engineer_features(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Engineer features from raw loan data
         
-        Feature engineering must match exactly what was done during training.
-        This is critical for model accuracy.
+        Args:
+            data: Raw loan application data
+            
+        Returns:
+            Engineered features dictionary
         """
-        total_income = request.applicant_income + request.coapplicant_income
+        applicant_income = float(data.get("applicant_income", 0))
+        coapplicant_income = float(data.get("coapplicant_income", 0))
+        loan_amount = float(data.get("loan_amount", 0))
+        loan_tenure = float(data.get("loan_tenure", 1))  # Avoid division by zero
 
-        # Loan-to-income ratio
-        loan_to_income_ratio = (
-            request.loan_amount / total_income if total_income > 0 else 0
-        )
-
-        # EMI calculation
-        emi = (
-            request.loan_amount / request.loan_amount_term
-            if request.loan_amount_term > 0
-            else 0
-        )
+        # Calculate derived features
+        total_income = applicant_income + coapplicant_income
+        loan_to_income_ratio = loan_amount / total_income if total_income > 0 else 0
+        emi = loan_amount / loan_tenure if loan_tenure > 0 else 0
 
         # Log transformations (add 1 to avoid log(0))
-        applicant_income_log = np.log(request.applicant_income + 1)
-        coapplicant_income_log = np.log(request.coapplicant_income + 1)
-        loan_amount_log = np.log(request.loan_amount + 1)
+        applicant_income_log = np.log(applicant_income + 1)
+        coapplicant_income_log = np.log(coapplicant_income + 1)
+        loan_amount_log = np.log(loan_amount + 1)
         total_income_log = np.log(total_income + 1)
 
         return {
-            "ApplicantIncome": request.applicant_income,
-            "ApplicantIncome_log": applicant_income_log,
-            "CIBIL_Score": request.cibil_score,
-            "CoapplicantIncome": request.coapplicant_income,
-            "CoapplicantIncome_log": coapplicant_income_log,
-            "Credit_History": request.credit_history,
-            "Dependents_1": 1 if request.dependents == 1 else 0,
-            "Dependents_2": 1 if request.dependents == 2 else 0,
-            "Dependents_3+": 1 if request.dependents >= 3 else 0,
-            "Education_Not Graduate": 1 if request.education == 1 else 0,
-            "EMI_feature": emi,
-            "Gender_Male": 1 if request.gender == 1 else 0,
-            "LoanAmount": request.loan_amount,
-            "LoanAmount_log": loan_amount_log,
-            "Loan_Amount_Term": request.loan_amount_term,
-            "Loan_to_Income_Ratio": loan_to_income_ratio,
-            "Married_Yes": 1 if request.married == 1 else 0,
-            "Property_Area_Semiurban": 1 if request.property_area == 1 else 0,
-            "Property_Area_Urban": 1 if request.property_area == 2 else 0,
-            "Self_Employed_Yes": 1 if request.self_employed == 1 else 0,
-            "Total_Income": total_income,
-            "Total_Income_log": total_income_log,
+            # Original features
+            "applicant_income": applicant_income,
+            "coapplicant_income": coapplicant_income,
+            "loan_amount": loan_amount,
+            "loan_tenure": loan_tenure,
+            "credit_history": float(data.get("credit_history", 0)),
+            "cibil_score": int(data.get("cibil_score", 300)),
+            # Demographic features
+            "gender": int(data.get("gender", 0)),
+            "marital_status": int(data.get("marital_status", 0)),
+            "dependents": int(data.get("dependents", 0)),
+            "education": int(data.get("education", 0)),
+            "employment_type": int(data.get("employment_type", 0)),
+            "property_area": int(data.get("property_area", 0)),
+            # Engineered features
+            "total_income": total_income,
+            "loan_to_income_ratio": loan_to_income_ratio,
+            "emi": emi,
+            "applicant_income_log": applicant_income_log,
+            "coapplicant_income_log": coapplicant_income_log,
+            "loan_amount_log": loan_amount_log,
+            "total_income_log": total_income_log,
         }
 
-    def _create_feature_vector(self, features: Dict[str, float]) -> pd.DataFrame:
-        """Create feature vector in exact order expected by model
+    def _create_feature_dataframe(self, features: Dict[str, Any]) -> pd.DataFrame:
+        """Create feature dataframe matching model training format
         
-        Feature order MUST match training exactly.
-        Pandas get_dummies() creates features in alphabetical order.
+        Args:
+            features: Engineered features
+            
+        Returns:
+            DataFrame with proper feature encoding
         """
-        return pd.DataFrame([features])
+        # One-hot encode categorical variables
+        dependents = features["dependents"]
+        education = features["education"]
+        gender = features["gender"]
+        marital_status = features["marital_status"]
+        employment_type = features["employment_type"]
+        property_area = features["property_area"]
+
+        return pd.DataFrame(
+            {
+                "ApplicantIncome": [features["applicant_income"]],
+                "ApplicantIncome_log": [features["applicant_income_log"]],
+                "CIBIL_Score": [features["cibil_score"]],
+                "CoapplicantIncome": [features["coapplicant_income"]],
+                "CoapplicantIncome_log": [features["coapplicant_income_log"]],
+                "Credit_History": [features["credit_history"]],
+                "Dependents_1": [1 if dependents == 1 else 0],
+                "Dependents_2": [1 if dependents == 2 else 0],
+                "Dependents_3+": [1 if dependents >= 3 else 0],
+                "Education_Not Graduate": [1 if education == 1 else 0],
+                "EMI_feature": [features["emi"]],
+                "Gender_Male": [1 if gender == 1 else 0],
+                "LoanAmount": [features["loan_amount"]],
+                "LoanAmount_log": [features["loan_amount_log"]],
+                "Loan_Amount_Term": [features["loan_tenure"]],
+                "Loan_to_Income_Ratio": [features["loan_to_income_ratio"]],
+                "Married_Yes": [1 if marital_status == 1 else 0],
+                "Property_Area_Semiurban": [1 if property_area == 1 else 0],
+                "Property_Area_Urban": [1 if property_area == 2 else 0],
+                "Self_Employed_Yes": [1 if employment_type == 1 else 0],
+                "Total_Income": [features["total_income"]],
+                "Total_Income_log": [features["total_income_log"]],
+            }
+        )
+
+    def _format_prediction_result(
+        self, prediction: np.ndarray, probabilities: np.ndarray
+    ) -> Dict[str, Any]:
+        """Format prediction result with confidence and risk level
+        
+        Args:
+            prediction: Model prediction (0 or 1)
+            probabilities: Prediction probabilities
+            
+        Returns:
+            Formatted result dictionary
+        """
+        pred_class = int(prediction[0])
+        confidence = float(probabilities[0][pred_class] * 100)
+        decision = "APPROVED" if pred_class == 1 else "REJECTED"
+
+        # Determine risk level based on confidence
+        if confidence >= 90:
+            risk_level = "LOW"
+        elif confidence >= 70:
+            risk_level = "MEDIUM"
+        else:
+            risk_level = "HIGH"
+
+        return {
+            "decision": decision,
+            "confidence": round(confidence, 2),
+            "risk_level": risk_level,
+        }
 
     def _save_prediction(
-        self, user_id: str, request: LoanPredictionRequest, result: PredictionResponse
+        self,
+        user_id: str,
+        loan_data: Dict[str, Any],
+        features: Dict[str, Any],
+        result: Dict[str, Any],
     ):
-        """Save prediction to database for audit trail
-        
-        Business Rule: All predictions must be logged for:
-        - Compliance and audit requirements
-        - Model performance monitoring
-        - User history tracking
-        """
-        try:
-            with self.db_connection_factory() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO loan_predictions (
-                        user_id, first_name, last_name, gender, marital_status,
-                        dependents_count, education_level, employment_type, property_location,
-                        credit_history, cibil_score, applicant_income, coapplicant_income,
-                        loan_amount, loan_tenure, prediction_result, confidence_score
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                    (
-                        user_id,
-                        request.first_name,
-                        request.last_name,
-                        request.gender,
-                        request.married,
-                        request.dependents,
-                        request.education,
-                        request.self_employed,
-                        request.property_area,
-                        request.credit_history,
-                        request.cibil_score,
-                        request.applicant_income,
-                        request.coapplicant_income,
-                        request.loan_amount,
-                        request.loan_amount_term,
-                        result.prediction_result,
-                        result.confidence_score,
-                    ),
-                )
-                conn.commit()
-
-            logger.info(f"Prediction saved for user: {user_id}")
-
-        except Exception as e:
-            # Log error but don't fail the prediction
-            # Prediction succeeded, saving is secondary
-            logger.error(
-                f"Failed to save prediction for user {user_id}: {e}", exc_info=True
-            )
-
-    def get_user_predictions(self, user_id: str, limit: int = 10) -> list:
-        """Retrieve prediction history for a user
+        """Save prediction record to database
         
         Args:
             user_id: User identifier
-            limit: Maximum number of predictions to retrieve
+            loan_data: Original loan data
+            features: Engineered features
+            result: Prediction result
+            
+        Returns:
+            Created prediction record
+        """
+        return self.prediction_repo.create(
+            user_id=user_id,
+            first_name=loan_data.get("first_name", ""),
+            last_name=loan_data.get("last_name", ""),
+            gender=features["gender"],
+            marital_status=features["marital_status"],
+            dependents_count=features["dependents"],
+            education_level=features["education"],
+            employment_type=features["employment_type"],
+            property_location=features["property_area"],
+            credit_history=features["credit_history"],
+            cibil_score=features["cibil_score"],
+            applicant_income=features["applicant_income"],
+            coapplicant_income=features["coapplicant_income"],
+            loan_amount=features["loan_amount"],
+            loan_tenure=features["loan_tenure"],
+            prediction_result=result["decision"],
+            confidence_score=result["confidence"],
+        )
+
+    def get_user_prediction_history(
+        self, user_id: str, limit: int = 10
+    ) -> list[Dict[str, Any]]:
+        """Get prediction history for a user
+        
+        Args:
+            user_id: User identifier
+            limit: Maximum number of records
             
         Returns:
             List of prediction records
         """
-        try:
-            with self.db_connection_factory() as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    SELECT * FROM loan_predictions
-                    WHERE user_id = ?
-                    ORDER BY created_at DESC
-                    LIMIT ?
-                """,
-                    (user_id, limit),
-                )
-                predictions = cursor.fetchall()
+        predictions = self.prediction_repo.get_by_user_id(user_id, limit=limit)
 
-            return [dict(row) for row in predictions]
-
-        except Exception as e:
-            logger.error(
-                f"Error retrieving predictions for user {user_id}: {e}", exc_info=True
-            )
-            raise
+        return [
+            {
+                "id": pred.id,
+                "loan_amount": pred.loan_amount,
+                "prediction": pred.prediction_result,
+                "confidence": pred.confidence_score,
+                "created_at": pred.created_at.isoformat() if pred.created_at else None,
+            }
+            for pred in predictions
+        ]
