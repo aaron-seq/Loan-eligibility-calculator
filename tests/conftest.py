@@ -1,120 +1,131 @@
-"""Pytest Configuration and Shared Fixtures
+"""Pytest Configuration and Fixtures
 
-Provides reusable fixtures for all tests.
+Defines shared fixtures for testing.
 """
 
 import os
+import sys
 import pytest
 import tempfile
-import sqlite3
-from contextlib import contextmanager
+import shutil
 from faker import Faker
 
-from src.config import Settings
-from src.utils.database import initialize_database
+# Add src to path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), ".." )))
 
-fake = Faker()
+from src.repositories.user_repository import UserRepository
+from src.repositories.admin_repository import AdminRepository
+from src.repositories.prediction_repository import PredictionRepository
+from src.services.auth_service import AuthService
+from src.services.prediction_service import PredictionService
+from src.ml.model_loader import ModelLoader
+from src.utils.database import DatabaseManager
 
 
 @pytest.fixture(scope="session")
-def test_settings():
-    """Create test configuration
-    
-    Uses in-memory database for isolation.
-    """
-    # Create temporary directory for test database
-    temp_dir = tempfile.mkdtemp()
-    test_db_path = os.path.join(temp_dir, "test_loan.db")
-
-    settings = Settings(
-        SECRET_KEY="test-secret-key-do-not-use-in-production",
-        DATABASE_PATH=test_db_path,
-        MODEL_PATH="models",
-        FLASK_ENV="testing",
-        DEBUG=False,
-    )
-
-    yield settings
-
-    # Cleanup
-    if os.path.exists(test_db_path):
-        os.remove(test_db_path)
-    os.rmdir(temp_dir)
+def faker_instance():
+    """Faker instance for generating realistic test data"""
+    return Faker()
 
 
 @pytest.fixture(scope="function")
-def db_connection(test_settings):
-    """Provide clean database connection for each test
-    
-    Before/After State Methodology:
-    - Each test gets fresh database
-    - State is isolated between tests
-    """
-    # Initialize fresh database
-    initialize_database(test_settings.DATABASE_PATH)
-
-    @contextmanager
-    def get_connection():
-        conn = sqlite3.connect(test_settings.DATABASE_PATH)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys = ON")
-        try:
-            yield conn
-        finally:
-            conn.close()
-
-    yield get_connection
-
-    # Cleanup database after test
-    if os.path.exists(test_settings.DATABASE_PATH):
-        os.remove(test_settings.DATABASE_PATH)
+def test_db_path(tmp_path):
+    """Create temporary database for testing"""
+    db_path = tmp_path / "test_loan_prediction.db"
+    yield str(db_path)
+    # Cleanup after test
+    if db_path.exists():
+        db_path.unlink()
 
 
-@pytest.fixture
-def realistic_user_data():
-    """Generate realistic user registration data
-    
-    Domain Realism: Uses Faker for production-like data.
-    No "foo", "bar", or "test" placeholders.
-    """
+@pytest.fixture(scope="function")
+def db_manager(test_db_path):
+    """Database manager with test database"""
+    manager = DatabaseManager(test_db_path)
+    manager.initialize_database()
+    yield manager
+    manager.close()
+
+
+@pytest.fixture(scope="function")
+def user_repository(test_db_path, db_manager):
+    """User repository fixture"""
+    return UserRepository(test_db_path)
+
+
+@pytest.fixture(scope="function")
+def admin_repository(test_db_path, db_manager):
+    """Admin repository fixture"""
+    return AdminRepository(test_db_path)
+
+
+@pytest.fixture(scope="function")
+def prediction_repository(test_db_path, db_manager):
+    """Prediction repository fixture"""
+    return PredictionRepository(test_db_path)
+
+
+@pytest.fixture(scope="function")
+def auth_service(user_repository, admin_repository):
+    """Authentication service fixture"""
+    return AuthService(user_repository, admin_repository)
+
+
+@pytest.fixture(scope="function")
+def model_loader_mock():
+    """Mock model loader for testing without actual models"""
+    class MockModelLoader:
+        def is_model_loaded(self):
+            return True
+
+        def predict(self, features):
+            import numpy as np
+            return np.array([1])  # Always approve
+
+        def predict_proba(self, features):
+            import numpy as np
+            return np.array([[0.2, 0.8]])  # 80% confidence
+
+        def scale_features(self, features):
+            return features
+
+    return MockModelLoader()
+
+
+@pytest.fixture(scope="function")
+def prediction_service(prediction_repository, model_loader_mock):
+    """Prediction service fixture with mocked model"""
+    return PredictionService(prediction_repository, model_loader_mock)
+
+
+@pytest.fixture(scope="function")
+def sample_user_data(faker_instance):
+    """Generate realistic user registration data"""
     return {
-        "user_id": fake.user_name(),
-        "email": fake.email(),
-        "full_name": fake.name(),
-        "mobile_number": fake.phone_number()[:15],  # Limit to 15 digits
-        "password": fake.password(length=12, special_chars=True),
-        "confirm_password": None,  # Will be set same as password
+        "user_id": faker_instance.user_name(),
+        "email": faker_instance.email(),
+        "full_name": faker_instance.name(),
+        "password": "SecurePass123!",
+        "mobile_number": faker_instance.phone_number()[:15],
     }
 
 
-@pytest.fixture
-def realistic_loan_data():
-    """Generate realistic loan application data
-    
-    Domain Realism: Uses real-world ranges for loan parameters.
-    """
+@pytest.fixture(scope="function")
+def sample_loan_data(faker_instance):
+    """Generate realistic loan application data"""
     return {
-        "first_name": fake.first_name(),
-        "last_name": fake.last_name(),
-        "gender": fake.random_int(min=0, max=1),
-        "married": fake.random_int(min=0, max=1),
-        "dependents": fake.random_int(min=0, max=3),
-        "education": fake.random_int(min=0, max=1),
-        "self_employed": fake.random_int(min=0, max=1),
-        "property_area": fake.random_int(min=0, max=2),
-        "credit_history": fake.random_int(min=0, max=1),
-        "cibil_score": fake.random_int(min=300, max=900),
-        "applicant_income": float(fake.random_int(min=20000, max=500000)),
-        "coapplicant_income": float(fake.random_int(min=0, max=300000)),
-        "loan_amount": float(fake.random_int(min=50000, max=5000000)),
-        "loan_amount_term": float(fake.random_int(min=12, max=360)),
-    }
-
-
-@pytest.fixture
-def admin_credentials():
-    """Provide admin credentials for testing"""
-    return {
-        "admin_id": "test_admin",
-        "password": "test_admin_password_123",
+        "first_name": faker_instance.first_name(),
+        "last_name": faker_instance.last_name(),
+        "gender": 1,
+        "marital_status": 1,
+        "dependents": 2,
+        "education": 0,
+        "employment_type": 0,
+        "property_area": 1,
+        "credit_history": 1.0,
+        "cibil_score": 750,
+        "applicant_income": 50000.0,
+        "coapplicant_income": 30000.0,
+        "loan_amount": 200000.0,
+        "loan_tenure": 360.0,
     }

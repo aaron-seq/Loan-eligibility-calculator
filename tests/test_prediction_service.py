@@ -1,183 +1,145 @@
-"""Unit Tests for PredictionService
+"""Tests for Prediction Service
 
-Requirement Extraction:
-- Predictions must validate loan parameters
-- Feature engineering must match training process exactly
-- Predictions must be saved for audit trail
-- High loan-to-income ratios must be logged
-
-Domain Realism: Uses realistic financial data.
+Tests follow the 7-Step Validation Protocol with realistic data.
 """
 
 import pytest
-import os
-import pickle
-import numpy as np
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
 
-from src.services.prediction_service import PredictionService
-from src.models.schemas import LoanPredictionRequest
-from src.exceptions import (
-    ModelNotAvailableError,
-    ValidationError,
-    PredictionError,
-)
+from src.utils.exceptions import ValidationError, PredictionError
 
 
-class TestPredictionService:
-    """Test prediction business logic"""
+class TestLoanPrediction:
+    """Test loan eligibility prediction service"""
 
-    @pytest.fixture
-    def mock_model(self, tmp_path):
-        """Create mock ML model for testing
-        
-        Avoids dependency on actual trained models.
-        """
-        # Create simple mock model
-        model = RandomForestClassifier(n_estimators=10, random_state=42)
-        scaler = StandardScaler()
-
-        # Create dummy training data with 22 features
-        X_train = np.random.rand(100, 22)
-        y_train = np.random.randint(0, 2, 100)
-
-        # Train mock model
-        X_scaled = scaler.fit_transform(X_train)
-        model.fit(X_scaled, y_train)
-
-        # Save to temp directory
-        model_path = tmp_path / "models"
-        model_path.mkdir()
-
-        with open(model_path / "loan_eligibility_model.pkl", "wb") as f:
-            pickle.dump(model, f)
-
-        with open(model_path / "feature_scaler.pkl", "wb") as f:
-            pickle.dump(scaler, f)
-
-        return str(model_path)
-
-    def test_prediction_with_valid_data(
-        self, db_connection, realistic_loan_data, mock_model
+    def test_successful_prediction_with_valid_data(
+        self, prediction_service, sample_loan_data, prediction_repository
     ):
-        """Test successful prediction with realistic data
+        """Test successful prediction with valid loan application
         
-        7-Step Process applied:
-        1. Requirement: Generate loan prediction
-        2. Domain Realism: Realistic loan amounts and incomes
-        3. Positive Testing: Valid input
-        4. Specificity: Check exact prediction structure
-        5. Automation: pytest
-        6. Manual Curation: Verified data ranges
-        7. Reproducibility: Mock model for consistency
+        Requirement: System should generate prediction for valid loan data
         """
-        # Setup
-        prediction_service = PredictionService(db_connection, mock_model)
-        user_id = "test_user_for_prediction"
-
-        # Arrange
-        request = LoanPredictionRequest(**realistic_loan_data)
+        user_id = "test_user_001"
 
         # Before State: No predictions
-        with db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) as count FROM loan_predictions")
-            initial_count = cursor.fetchone()["count"]
+        initial_count = prediction_repository.count("loan_predictions")
 
-        # Act
-        result = prediction_service.predict_loan_eligibility(user_id, request)
+        # Action: Generate prediction
+        result = prediction_service.predict_loan_eligibility(
+            user_id=user_id, loan_data=sample_loan_data
+        )
 
-        # After State: One prediction added
-        with db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) as count FROM loan_predictions")
-            final_count = cursor.fetchone()["count"]
+        # After State: Verify prediction created
+        final_count = prediction_repository.count("loan_predictions")
+        assert final_count == initial_count + 1
 
-        # Specificity: Exact assertions
-        assert final_count == initial_count + 1, "Exactly one prediction should be saved"
-        assert result.prediction_result in [
-            "APPROVED",
-            "REJECTED",
-        ], "Prediction must be APPROVED or REJECTED"
-        assert 0 <= result.confidence_score <= 100, "Confidence must be 0-100%"
-        assert isinstance(result.message, str)
-        assert len(result.message) > 0
+        # Verify specific result structure
+        assert "prediction_id" in result
+        assert "decision" in result
+        assert "confidence" in result
+        assert "risk_level" in result
+        assert "timestamp" in result
 
-    def test_negative_income_rejected(self, db_connection, realistic_loan_data, mock_model):
-        """Test that negative income is rejected
+        # Verify decision is one of expected values
+        assert result["decision"] in ["APPROVED", "REJECTED"]
+
+        # Verify confidence is percentage between 0 and 100
+        assert 0 <= result["confidence"] <= 100
+
+        # Verify risk level is one of expected values
+        assert result["risk_level"] in ["LOW", "MEDIUM", "HIGH"]
+
+    def test_prediction_fails_with_negative_income(
+        self, prediction_service, sample_loan_data
+    ):
+        """Test prediction failure with negative income
         
-        Negative Testing: Invalid input validation.
+        Requirement: System must reject negative income values
         """
-        prediction_service = PredictionService(db_connection, mock_model)
-        user_id = "test_user"
-
-        # Arrange: Negative income
-        realistic_loan_data["applicant_income"] = -50000.0
-        request = LoanPredictionRequest(**realistic_loan_data)
-
-        # Act & Assert
-        with pytest.raises(ValidationError) as exc_info:
-            prediction_service.predict_loan_eligibility(user_id, request)
-
-        assert "positive" in str(exc_info.value).lower()
-
-    def test_zero_loan_amount_rejected(self, db_connection, realistic_loan_data, mock_model):
-        """Test that zero loan amount is rejected
-        
-        Negative Testing: Invalid loan amount.
-        """
-        prediction_service = PredictionService(db_connection, mock_model)
-        user_id = "test_user"
-
-        # Arrange
-        realistic_loan_data["loan_amount"] = 0.0
-        request = LoanPredictionRequest(**realistic_loan_data)
-
-        # Act & Assert
-        with pytest.raises(ValidationError):
-            prediction_service.predict_loan_eligibility(user_id, request)
-
-    def test_invalid_cibil_score_rejected(self, db_connection, realistic_loan_data, mock_model):
-        """Test that invalid CIBIL score is rejected
-        
-        Requirement: CIBIL score must be 300-900.
-        """
-        prediction_service = PredictionService(db_connection, mock_model)
-        user_id = "test_user"
-
-        # Test below minimum
-        realistic_loan_data["cibil_score"] = 299
-        request = LoanPredictionRequest(**realistic_loan_data)
+        sample_loan_data["applicant_income"] = -10000.0
 
         with pytest.raises(ValidationError) as exc_info:
-            prediction_service.predict_loan_eligibility(user_id, request)
+            prediction_service.predict_loan_eligibility(
+                user_id="test_user", loan_data=sample_loan_data
+            )
+
+        assert "income" in str(exc_info.value).lower()
+
+    def test_prediction_fails_with_excessive_loan_amount(
+        self, prediction_service, sample_loan_data
+    ):
+        """Test prediction failure with excessive loan amount
+        
+        Requirement: Loan amount must be within acceptable range
+        """
+        sample_loan_data["loan_amount"] = 100000000.0  # 10 Crores - excessive
+
+        with pytest.raises(ValidationError) as exc_info:
+            prediction_service.predict_loan_eligibility(
+                user_id="test_user", loan_data=sample_loan_data
+            )
+
+        assert "loan amount" in str(exc_info.value).lower()
+
+    def test_prediction_fails_with_invalid_cibil_score(
+        self, prediction_service, sample_loan_data
+    ):
+        """Test prediction failure with invalid CIBIL score
+        
+        Requirement: CIBIL score must be between 300 and 900
+        """
+        sample_loan_data["cibil_score"] = 1000  # Above maximum
+
+        with pytest.raises(ValidationError) as exc_info:
+            prediction_service.predict_loan_eligibility(
+                user_id="test_user", loan_data=sample_loan_data
+            )
 
         assert "cibil" in str(exc_info.value).lower()
 
-        # Test above maximum
-        realistic_loan_data["cibil_score"] = 901
-        request = LoanPredictionRequest(**realistic_loan_data)
-
-        with pytest.raises(ValidationError):
-            prediction_service.predict_loan_eligibility(user_id, request)
-
-    def test_model_unavailable_error(self, db_connection, realistic_loan_data, tmp_path):
-        """Test proper error when ML model is not available
+    def test_prediction_fails_with_missing_required_fields(
+        self, prediction_service
+    ):
+        """Test prediction failure when required fields are missing
         
-        Negative Testing: Service degradation.
+        Requirement: All required fields must be provided
         """
-        # Create empty model directory
-        empty_model_path = str(tmp_path / "empty_models")
-        os.makedirs(empty_model_path, exist_ok=True)
+        incomplete_data = {
+            "first_name": "John",
+            # Missing many required fields
+        }
 
-        prediction_service = PredictionService(db_connection, empty_model_path)
-        user_id = "test_user"
+        with pytest.raises(ValidationError) as exc_info:
+            prediction_service.predict_loan_eligibility(
+                user_id="test_user", loan_data=incomplete_data
+            )
 
-        request = LoanPredictionRequest(**realistic_loan_data)
+        assert "required" in str(exc_info.value).lower()
 
-        # Act & Assert
-        with pytest.raises(ModelNotAvailableError) as exc_info:
-            prediction_service.predict_loan_eligibility(user_id, request)
+    def test_get_user_prediction_history(
+        self, prediction_service, sample_loan_data, prediction_repository
+    ):
+        """Test retrieving user prediction history
+        
+        Requirement: Users should be able to view their prediction history
+        """
+        user_id = "test_user_history"
 
-        assert "unavailable" in str(exc_info.value).lower()
+        # Create multiple predictions
+        for _ in range(3):
+            prediction_service.predict_loan_eligibility(
+                user_id=user_id, loan_data=sample_loan_data
+            )
+
+        # Retrieve history
+        history = prediction_service.get_user_prediction_history(user_id, limit=10)
+
+        # Verify: Should have exactly 3 predictions
+        assert len(history) == 3
+
+        # Verify structure of history items
+        for item in history:
+            assert "id" in item
+            assert "loan_amount" in item
+            assert "prediction" in item
+            assert "confidence" in item
+            assert "created_at" in item
