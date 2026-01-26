@@ -1,31 +1,25 @@
-"""Prediction Controller - Handles loan prediction HTTP requests
+"""Prediction Controller - HTTP Layer
 
-HTTP concerns only. Business logic in PredictionService.
+Handles prediction HTTP requests and delegates to PredictionService.
 """
 
-from flask import Blueprint, request, jsonify, session
+from flask import Blueprint, request, session, jsonify
 from pydantic import ValidationError as PydanticValidationError
 
 from src.models.schemas import LoanPredictionRequest
 from src.services.prediction_service import PredictionService
-from src.exceptions import (
-    ModelNotAvailableError,
-    PredictionError,
+from src.utils.logger import get_logger
+from src.utils.exceptions import (
     ValidationError,
+    PredictionError,
+    ModelNotAvailableError,
 )
-from src.logger import get_logger
-from src.utils.decorators import (
-    rate_limit,
-    add_correlation_id,
-    require_authentication,
-)
-from src.utils.response import success_response, error_response
+from src.utils.decorators import require_login, rate_limit, require_json
 
 logger = get_logger(__name__)
+prediction_blueprint = Blueprint("prediction", __name__, url_prefix="/api/predict")
 
-prediction_bp = Blueprint("prediction", __name__, url_prefix="/api")
-
-# Service injection
+# Service will be injected during app initialization
 prediction_service: PredictionService = None
 
 
@@ -35,153 +29,108 @@ def init_prediction_controller(service: PredictionService):
     prediction_service = service
 
 
-@prediction_bp.route("/predict", methods=["POST"])
-@add_correlation_id
-@require_authentication
-@rate_limit(max_requests=20, window_seconds=3600)  # 20 predictions per hour
+@prediction_blueprint.route("/", methods=["POST"])
+@require_login
+@rate_limit(max_requests=20, window_seconds=60)
+@require_json
 def predict():
-    """Handle loan prediction request
+    """Loan eligibility prediction endpoint
     
-    HTTP concerns:
-    - Parse request data
-    - Validate schema
-    - Format response
+    Request Body:
+        - first_name: Applicant first name
+        - last_name: Applicant last name
+        - gender: Gender (0=Female, 1=Male)
+        - marital_status: Marital status (0=No, 1=Yes)
+        - dependents: Number of dependents
+        - education: Education (0=Graduate, 1=Not Graduate)
+        - employment_type: Employment (0=No, 1=Yes)
+        - applicant_income: Applicant income
+        - coapplicant_income: Co-applicant income
+        - loan_amount: Loan amount requested
+        - loan_tenure: Loan tenure in months
+        - credit_history: Credit history (0=No, 1=Yes)
+        - property_area: Property area (0=Rural, 1=Semiurban, 2=Urban)
+        - cibil_score: CIBIL score (300-900)
+        
+    Returns:
+        200: Prediction successful
+        400: Validation error
+        401: Not authenticated
+        503: Model unavailable
+        500: Server error
     """
     try:
-        # Get user from session
         user_id = session.get("user_id")
 
-        # Parse request data
-        data = request.get_json() if request.is_json else request.form.to_dict()
+        # Validate request
+        data = LoanPredictionRequest(**request.json)
 
-        # Convert string numbers to appropriate types
-        for field in [
-            "gender",
-            "married",
-            "dependents",
-            "education",
-            "self_employed",
-            "property_area",
-            "credit_history",
-            "cibil_score",
-        ]:
-            if field in data and isinstance(data[field], str):
-                data[field] = int(data[field])
-
-        for field in [
-            "applicant_income",
-            "coapplicant_income",
-            "loan_amount",
-            "loan_amount_term",
-        ]:
-            if field in data and isinstance(data[field], str):
-                data[field] = float(data[field])
-
-        # Validate using Pydantic schema
-        prediction_request = LoanPredictionRequest(**data)
-
-        # Delegate to service
-        result = prediction_service.predict_loan_eligibility(user_id, prediction_request)
-
-        # Format response
-        return success_response(
-            data=result.dict(),
-            message=result.message,
+        # Generate prediction
+        result = prediction_service.predict_loan_eligibility(
+            user_id=user_id,
+            loan_data=data.dict(),
         )
+
+        logger.info(f"Prediction successful for user: {user_id}")
+
+        return jsonify(
+            {
+                "success": True,
+                "message": f"Loan {result['decision'].lower()}",
+                "data": result,
+            }
+        ), 200
 
     except PydanticValidationError as e:
-        logger.warning(f"Prediction validation error: {e}")
-        return error_response(
-            message="Invalid prediction request data",
-            errors=e.errors(),
-            status_code=400,
-        )
+        return jsonify({"success": False, "message": "Validation error", "errors": e.errors()}), 400
 
     except ValidationError as e:
-        return error_response(
-            message=str(e),
-            status_code=400,
-        )
+        logger.warning(f"Prediction validation error: {e}")
+        return jsonify({"success": False, "message": str(e)}), 400
 
     except ModelNotAvailableError as e:
-        return error_response(
-            message=str(e),
-            status_code=503,
-        )
+        logger.error(f"Model unavailable: {e}")
+        return jsonify({"success": False, "message": str(e)}), 503
 
     except PredictionError as e:
-        return error_response(
-            message=str(e),
-            status_code=500,
-        )
+        logger.error(f"Prediction error: {e}")
+        return jsonify({"success": False, "message": str(e)}), 500
 
     except Exception as e:
         logger.error(f"Unexpected prediction error: {e}", exc_info=True)
-        return error_response(
-            message="Prediction failed. Please try again.",
-            status_code=500,
-        )
+        return jsonify({"success": False, "message": "Prediction failed"}), 500
 
 
-@prediction_bp.route("/predictions/history", methods=["GET"])
-@add_correlation_id
-@require_authentication
+@prediction_blueprint.route("/history", methods=["GET"])
+@require_login
 def get_history():
     """Get user's prediction history
     
-    HTTP concerns:
-    - Parse query parameters
-    - Format response
+    Query Params:
+        - limit: Number of records (default: 10)
+        - offset: Pagination offset (default: 0)
+        
+    Returns:
+        200: History retrieved
+        401: Not authenticated
+        500: Server error
     """
     try:
         user_id = session.get("user_id")
-        limit = int(request.args.get("limit", 10))
+        limit = min(int(request.args.get("limit", 10)), 100)
 
-        # Validate limit
-        if limit < 1 or limit > 100:
-            return error_response(
-                message="Limit must be between 1 and 100",
-                status_code=400,
-            )
-
-        # Delegate to service
-        predictions = prediction_service.get_user_predictions(user_id, limit)
-
-        return success_response(
-            data={"predictions": predictions, "count": len(predictions)},
-            message="Prediction history retrieved successfully",
+        history = prediction_service.get_user_prediction_history(
+            user_id=user_id,
+            limit=limit,
         )
 
-    except Exception as e:
-        logger.error(f"Error retrieving prediction history: {e}", exc_info=True)
-        return error_response(
-            message="Failed to retrieve prediction history",
-            status_code=500,
-        )
-
-
-@prediction_bp.route("/health", methods=["GET"])
-@add_correlation_id
-def health_check():
-    """Health check endpoint for monitoring
-    
-    Returns service health status including model availability.
-    """
-    try:
-        from datetime import datetime
-
-        health_status = {
-            "status": "healthy",
-            "timestamp": datetime.utcnow().isoformat(),
-            "model_available": (
-                prediction_service.is_available() if prediction_service else False
-            ),
-        }
-
-        status_code = 200 if health_status["model_available"] else 503
-
-        return jsonify(health_status), status_code
+        return jsonify(
+            {
+                "success": True,
+                "data": {"predictions": history, "count": len(history)},
+            }
+        ), 200
 
     except Exception as e:
-        logger.error(f"Health check error: {e}", exc_info=True)
-        return jsonify({"status": "unhealthy", "error": str(e)}), 500
+        logger.error(f"History retrieval error: {e}", exc_info=True)
+        return jsonify({"success": False, "message": "Failed to retrieve history"}), 500
