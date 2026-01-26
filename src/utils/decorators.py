@@ -1,132 +1,129 @@
-"""Decorators for Cross-Cutting Concerns
+"""Decorators for Controllers
 
-Decorators handle concerns that apply across multiple routes:
-- Authentication
-- Rate limiting
-- Request tracking
-- Caching
+Provides reusable decorators for authentication, rate limiting, and validation.
 """
 
 import time
-import uuid
 from functools import wraps
-from typing import Callable, Dict
-from flask import request, session, g, jsonify
+from flask import session, jsonify, request
+from collections import defaultdict
+from typing import Callable
 
-from src.logger import get_logger
-from src.utils.response import error_response
+from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Simple in-memory rate limiting (use Redis in production)
-_rate_limit_cache: Dict[str, list] = {}
+# Rate limiting storage (in-memory, use Redis in production)
+rate_limit_storage = defaultdict(list)
 
 
-def add_correlation_id(f: Callable) -> Callable:
-    """Add correlation ID to request for distributed tracing
-    
-    Correlation IDs allow tracking requests across services and logs.
-    This is critical for debugging in production.
+def require_login(f: Callable) -> Callable:
+    """Decorator to require user authentication
     
     Usage:
-        @app.route('/endpoint')
-        @add_correlation_id
-        def endpoint():
-            # g.correlation_id is now available
-            pass
+        @app.route('/protected')
+        @require_login
+        def protected_route():
+            return jsonify({'user': session['user_id']})
     """
 
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # Check if correlation ID exists in headers (from upstream service)
-        correlation_id = request.headers.get(
-            "X-Correlation-ID", str(uuid.uuid4())
-        )
-
-        # Store in Flask's g object for access in logging
-        g.correlation_id = correlation_id
-
-        # Log request with correlation ID
-        logger.info(
-            f"Request received: {request.method} {request.path}",
-            extra={"correlation_id": correlation_id},
-        )
-
-        # Execute function
-        response = f(*args, **kwargs)
-
-        # Add correlation ID to response headers
-        if isinstance(response, tuple):
-            response_obj, status_code = response[0], response[1]
-            if hasattr(response_obj, "headers"):
-                response_obj.headers["X-Correlation-ID"] = correlation_id
-        elif hasattr(response, "headers"):
-            response.headers["X-Correlation-ID"] = correlation_id
-
-        return response
+        if "user_id" not in session:
+            logger.warning(f"Unauthorized access attempt to {request.endpoint}")
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "message": "Authentication required",
+                    }
+                ),
+                401,
+            )
+        return f(*args, **kwargs)
 
     return decorated_function
 
 
-def rate_limit(max_requests: int = 10, window_seconds: int = 60) -> Callable:
-    """Rate limiting decorator to prevent abuse
+def require_admin(f: Callable) -> Callable:
+    """Decorator to require admin authentication
     
-    Implements sliding window rate limiting.
-    In production, use Redis with INCR and EXPIRE.
+    Usage:
+        @app.route('/admin')
+        @require_admin
+        def admin_route():
+            return jsonify({'admin': session['admin_id']})
+    """
+
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if "admin_id" not in session or not session.get("is_admin"):
+            logger.warning(f"Unauthorized admin access attempt to {request.endpoint}")
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "message": "Admin access required",
+                    }
+                ),
+                403,
+            )
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
+def rate_limit(max_requests: int = 60, window_seconds: int = 60) -> Callable:
+    """Decorator for rate limiting endpoints
     
     Args:
-        max_requests: Maximum number of requests allowed
+        max_requests: Maximum requests allowed
         window_seconds: Time window in seconds
         
     Usage:
         @app.route('/api/endpoint')
-        @rate_limit(max_requests=100, window_seconds=3600)
-        def endpoint():
-            pass
+        @rate_limit(max_requests=10, window_seconds=60)
+        def limited_endpoint():
+            return jsonify({'data': 'value'})
+    
+    Note: This is in-memory implementation. Use Redis in production for
+    distributed rate limiting across multiple app instances.
     """
 
     def decorator(f: Callable) -> Callable:
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            # Get client identifier (IP address or user ID)
-            client_id = (
-                session.get("user_id")
-                or session.get("admin_id")
-                or request.remote_addr
-            )
+            # Use IP address as identifier (use user_id in production)
+            identifier = request.remote_addr
+            key = f"{f.__name__}:{identifier}"
 
-            # Create cache key
-            cache_key = f"{f.__name__}:{client_id}"
-
-            # Get current time
             current_time = time.time()
 
-            # Initialize or get request timestamps
-            if cache_key not in _rate_limit_cache:
-                _rate_limit_cache[cache_key] = []
-
-            # Remove timestamps outside the window
-            _rate_limit_cache[cache_key] = [
-                timestamp
-                for timestamp in _rate_limit_cache[cache_key]
-                if current_time - timestamp < window_seconds
+            # Clean old requests outside window
+            rate_limit_storage[key] = [
+                req_time
+                for req_time in rate_limit_storage[key]
+                if current_time - req_time < window_seconds
             ]
 
-            # Check if limit exceeded
-            if len(_rate_limit_cache[cache_key]) >= max_requests:
+            # Check rate limit
+            if len(rate_limit_storage[key]) >= max_requests:
                 logger.warning(
-                    f"Rate limit exceeded for {cache_key}",
-                    extra={"correlation_id": getattr(g, "correlation_id", None)},
+                    f"Rate limit exceeded for {identifier} on {f.__name__}"
                 )
-                return error_response(
-                    message="Rate limit exceeded. Please try again later.",
-                    status_code=429,
+                return (
+                    jsonify(
+                        {
+                            "success": False,
+                            "message": "Rate limit exceeded. Please try again later.",
+                        }
+                    ),
+                    429,
                 )
 
-            # Add current request timestamp
-            _rate_limit_cache[cache_key].append(current_time)
+            # Add current request
+            rate_limit_storage[key].append(current_time)
 
-            # Execute function
             return f(*args, **kwargs)
 
         return decorated_function
@@ -134,61 +131,58 @@ def rate_limit(max_requests: int = 10, window_seconds: int = 60) -> Callable:
     return decorator
 
 
-def require_authentication(f: Callable) -> Callable:
-    """Require user authentication for endpoint
-    
-    Checks if user is logged in before allowing access.
+def require_json(f: Callable) -> Callable:
+    """Decorator to ensure request has JSON content type
     
     Usage:
-        @app.route('/protected')
-        @require_authentication
-        def protected_route():
-            # session['user_id'] is guaranteed to exist
-            pass
+        @app.route('/api/endpoint', methods=['POST'])
+        @require_json
+        def json_endpoint():
+            data = request.json
+            return jsonify(data)
     """
 
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if "user_id" not in session:
+        if not request.is_json:
             logger.warning(
-                f"Unauthorized access attempt to {request.path}",
-                extra={"correlation_id": getattr(g, "correlation_id", None)},
+                f"Non-JSON request to {request.endpoint} from {request.remote_addr}"
             )
-            return error_response(
-                message="Authentication required. Please log in.",
-                status_code=401,
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "message": "Content-Type must be application/json",
+                    }
+                ),
+                400,
             )
-
         return f(*args, **kwargs)
 
     return decorated_function
 
 
-def require_admin_authentication(f: Callable) -> Callable:
-    """Require admin authentication for endpoint
-    
-    Checks if admin is logged in before allowing access.
+def log_execution_time(f: Callable) -> Callable:
+    """Decorator to log endpoint execution time
     
     Usage:
-        @app.route('/admin/endpoint')
-        @require_admin_authentication
-        def admin_route():
-            # session['admin_id'] is guaranteed to exist
-            pass
+        @app.route('/api/slow-endpoint')
+        @log_execution_time
+        def slow_endpoint():
+            # expensive operation
+            return jsonify({'result': 'done'})
     """
 
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if "admin_id" not in session or not session.get("is_admin"):
-            logger.warning(
-                f"Unauthorized admin access attempt to {request.path}",
-                extra={"correlation_id": getattr(g, "correlation_id", None)},
-            )
-            return error_response(
-                message="Admin authentication required.",
-                status_code=403,
-            )
+        start_time = time.time()
+        result = f(*args, **kwargs)
+        execution_time = time.time() - start_time
 
-        return f(*args, **kwargs)
+        logger.info(
+            f"{f.__name__} executed in {execution_time:.3f}s for {request.remote_addr}"
+        )
+
+        return result
 
     return decorated_function
