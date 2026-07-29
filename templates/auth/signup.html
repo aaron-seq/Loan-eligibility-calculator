@@ -1,45 +1,55 @@
 {% extends "base.html" %}
+{% block title %}Create an account — LoanWise{% endblock %}
 {% block content %}
-<div class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
-  <div class="max-w-md w-full space-y-8">
-    <h2 class="text-2xl font-bold">Create your account</h2>
-    <form id="signupForm" class="space-y-4" onsubmit="handleSignup(event)">
-      <div>
-        <label for="user_id" class="block text-sm font-medium text-gray-700">Username</label>
-        <input id="user_id" name="user_id" required class="mt-1 block w-full border rounded px-3 py-2" />
-      </div>
-      <div>
-        <label for="email" class="block text-sm font-medium text-gray-700">Email</label>
-        <input id="email" name="email" type="email" required class="mt-1 block w-full border rounded px-3 py-2" />
-      </div>
-      <div>
-        <label for="full_name" class="block text-sm font-medium text-gray-700">Full name</label>
-        <input id="full_name" name="full_name" required class="mt-1 block w-full border rounded px-3 py-2" />
-      </div>
-      <div>
-        <label for="password" class="block text-sm font-medium text-gray-700">Password</label>
-        <input id="password" name="password" type="password" required class="mt-1 block w-full border rounded px-3 py-2" />
-      </div>
-      <div>
-        <label for="confirm_password" class="block text-sm font-medium text-gray-700">Confirm Password</label>
-        <input id="confirm_password" name="confirm_password" type="password" required class="mt-1 block w-full border rounded px-3 py-2" />
-      </div>
-      <button type="submit" class="w-full bg-primary text-white py-2 rounded">Sign up</button>
-    </form>
-  </div>
+<div class="max-w-sm mx-auto">
+  <h1 class="text-2xl font-bold text-slate-900">Create an account</h1>
+  <p class="mt-2 text-sm text-slate-600">
+    Only to save and compare your own applications. We ask for nothing we do not need.
+  </p>
+
+  <form method="post" action="{{ url_for('auth.register') }}"
+        class="mt-6 bg-white rounded-lg border border-slate-200 p-6 space-y-4">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div>
+      <label for="user_id" class="block text-sm font-medium text-slate-700">Username</label>
+      <input id="user_id" name="user_id" required autocomplete="username" minlength="3" maxlength="50"
+             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+      <p class="mt-1 text-xs text-slate-500">Letters, numbers, dot, dash or underscore.</p>
+    </div>
+    <div>
+      <label for="full_name" class="block text-sm font-medium text-slate-700">Name</label>
+      <input id="full_name" name="full_name" required autocomplete="name"
+             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+    </div>
+    <div>
+      <label for="email" class="block text-sm font-medium text-slate-700">Email</label>
+      <input id="email" name="email" type="email" required autocomplete="email"
+             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+    </div>
+    <div>
+      <label for="password" class="block text-sm font-medium text-slate-700">Password</label>
+      <input id="password" name="password" type="password" required minlength="12"
+             autocomplete="new-password"
+             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+      <p class="mt-1 text-xs text-slate-500">
+        At least 12 characters. Length matters more than punctuation — a short
+        phrase you will remember beats <code>P@ssw0rd</code>.
+      </p>
+    </div>
+    <div>
+      <label for="confirm_password" class="block text-sm font-medium text-slate-700">Confirm password</label>
+      <input id="confirm_password" name="confirm_password" type="password" required
+             autocomplete="new-password"
+             class="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm">
+    </div>
+    <button class="w-full py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">
+      Create account
+    </button>
+  </form>
+
+  <p class="mt-4 text-sm text-slate-600 text-center">
+    Already registered?
+    <a href="{{ url_for('pages.login') }}" class="text-indigo-600 underline">Sign in</a>
+  </p>
 </div>
-<script>
-async function handleSignup(e){
-  e.preventDefault();
-  const fd = new FormData(e.target);
-  const res = await fetch('/api/register',{method:'POST', body: fd});
-  const json = await res.json();
-  if(json.success){
-    showMessage('Registration successful. Please login.', 'success');
-    setTimeout(()=> location.href='/', 1200);
-  } else {
-    showMessage(json.message || 'Registration failed', 'error');
-  }
-}
-</script>
 {% endblock %}

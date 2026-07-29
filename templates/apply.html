@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block title %}Check your eligibility — LoanWise{% endblock %}
+
+{% macro field_error(errors, name) %}
+  {% if errors and errors.get(name) %}
+    <p class="mt-1 text-xs text-rose-600">{{ errors[name] }}</p>
+  {% endif %}
+{% endmacro %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto">
+  <h1 class="text-2xl font-bold text-slate-900">Check your eligibility</h1>
+  <p class="mt-2 text-sm text-slate-600">
+    Nine questions. Nothing is shared with any lender.
+    {% if not current_user %}
+      <a href="{{ url_for('pages.login') }}" class="text-indigo-600 underline">Sign in</a>
+      to save the result to your history.
+    {% endif %}
+  </p>
+
+  {% if errors %}
+    <div class="mt-4 rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+      Please correct the highlighted fields.
+    </div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('pages.submit_application') }}"
+        class="mt-6 bg-white rounded-lg border border-slate-200 p-6 space-y-6">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+    <fieldset>
+      <legend class="text-sm font-semibold text-slate-900 mb-3">Income and loan</legend>
+      <div class="grid sm:grid-cols-2 gap-4">
+        <div>
+          <label for="applicant_income" class="block text-sm font-medium text-slate-700">
+            Your monthly income
+          </label>
+          <input type="number" step="any" min="0" required id="applicant_income" name="applicant_income"
+                 value="{{ prefill.get('applicant_income', '') }}"
+                 class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm"
+                 placeholder="e.g. 55000">
+          <p class="mt-1 text-xs text-slate-500">Take-home pay per month, before this loan.</p>
+          {{ field_error(errors, 'applicant_income') }}
+        </div>
+        <div>
+          <label for="coapplicant_income" class="block text-sm font-medium text-slate-700">
+            Co-applicant monthly income
+          </label>
+          <input type="number" step="any" min="0" id="coapplicant_income" name="coapplicant_income"
+                 value="{{ prefill.get('coapplicant_income', 0) }}"
+                 class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm"
+                 placeholder="0 if applying alone">
+          {{ field_error(errors, 'coapplicant_income') }}
+        </div>
+        <div>
+          <label for="loan_amount" class="block text-sm font-medium text-slate-700">
+            Loan amount
+          </label>
+          <input type="number" step="any" min="1" required id="loan_amount" name="loan_amount"
+                 value="{{ prefill.get('loan_amount', '') }}"
+                 class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm"
+                 placeholder="e.g. 1500000">
+          {# The old form asked for "loan amount in thousands" because that is
+             how the dataset stores it. Asking a person to pre-divide by 1000
+             is a reliable way to collect wrong data. #}
+          <p class="mt-1 text-xs text-slate-500">The full amount you want to borrow.</p>
+          {{ field_error(errors, 'loan_amount') }}
+        </div>
+        <div>
+          <label for="loan_term_months" class="block text-sm font-medium text-slate-700">
+            Repayment term (months)
+          </label>
+          <input type="number" min="6" max="480" required id="loan_term_months" name="loan_term_months"
+                 value="{{ prefill.get('loan_term_months', 360) }}"
+                 class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm">
+          {{ field_error(errors, 'loan_term_months') }}
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend class="text-sm font-semibold text-slate-900 mb-3">Credit</legend>
+      <div class="grid sm:grid-cols-2 gap-4">
+        <div>
+          <label for="credit_history" class="block text-sm font-medium text-slate-700">
+            Repayment history
+          </label>
+          <select id="credit_history" name="credit_history"
+                  class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm">
+            <option value="1" {% if prefill.get('credit_history', 1)|int == 1 %}selected{% endif %}>
+              No defaults or missed payments
+            </option>
+            <option value="0" {% if prefill.get('credit_history', 1)|int == 0 %}selected{% endif %}>
+              I have defaults, arrears, or no credit record
+            </option>
+          </select>
+          {{ field_error(errors, 'credit_history') }}
+        </div>
+        <div>
+          <label for="cibil_score" class="block text-sm font-medium text-slate-700">
+            Credit score <span class="font-normal text-slate-500">(optional)</span>
+          </label>
+          <input type="number" min="300" max="900" id="cibil_score" name="cibil_score"
+                 value="{{ prefill.get('cibil_score') or '' }}"
+                 class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm"
+                 placeholder="300-900">
+          <p class="mt-1 text-xs text-slate-500">
+            Used in our published rules, not in the model — the training data has no credit scores.
+          </p>
+          {{ field_error(errors, 'cibil_score') }}
+        </div>
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend class="text-sm font-semibold text-slate-900 mb-3">Your circumstances</legend>
+      <div class="grid sm:grid-cols-2 gap-4">
+        <div>
+          <label for="dependents" class="block text-sm font-medium text-slate-700">Dependents</label>
+          <select id="dependents" name="dependents"
+                  class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm">
+            {% for n in [0, 1, 2, 3] %}
+              <option value="{{ n }}" {% if prefill.get('dependents', 0)|int == n %}selected{% endif %}>
+                {{ n }}{% if n == 3 %}+{% endif %}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="education" class="block text-sm font-medium text-slate-700">Education</label>
+          <select id="education" name="education"
+                  class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm">
+            <option value="graduate" {% if prefill.get('education') != 'not_graduate' %}selected{% endif %}>Graduate</option>
+            <option value="not_graduate" {% if prefill.get('education') == 'not_graduate' %}selected{% endif %}>Not a graduate</option>
+          </select>
+        </div>
+        <div>
+          <label for="property_area" class="block text-sm font-medium text-slate-700">Property area</label>
+          <select id="property_area" name="property_area"
+                  class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm">
+            {% for value, label in [('rural', 'Rural'), ('semiurban', 'Semi-urban'), ('urban', 'Urban')] %}
+              <option value="{{ value }}" {% if prefill.get('property_area', 'urban') == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="flex items-end">
+          <label class="flex items-center gap-2 text-sm text-slate-700 pb-2">
+            <input type="checkbox" name="self_employed" value="1" class="rounded border-slate-300"
+                   {% if prefill.get('self_employed') %}checked{% endif %}>
+            I am self-employed
+          </label>
+        </div>
+      </div>
+      <p class="mt-3 text-xs text-slate-500">
+        We do not ask for your gender or marital status. Using them as a basis for a
+        credit decision is prohibited, and we measured that excluding them costs
+        this model no accuracy.
+      </p>
+    </fieldset>
+
+    <div>
+      <label for="label" class="block text-sm font-medium text-slate-700">
+        Label this scenario <span class="font-normal text-slate-500">(optional)</span>
+      </label>
+      <input type="text" maxlength="80" id="label" name="label" value="{{ prefill.get('label', '') }}"
+             class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm"
+             placeholder="e.g. Home loan, shorter term">
+    </div>
+
+    <button type="submit"
+            {% if model_status != 'ready' %}disabled{% endif %}
+            class="w-full py-3 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed">
+      {% if model_status == 'ready' %}See my result{% else %}Assessment unavailable{% endif %}
+    </button>
+  </form>
+</div>
+{% endblock %}

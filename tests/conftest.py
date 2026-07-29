@@ -1,112 +1,115 @@
 """Shared fixtures.
 
-Every test runs against a throwaway SQLite file and a real Flask test client,
-so the request/response cycle under test is the one that ships.
+Two kinds of test app:
+
+* ``app`` — a real model bundle loaded from ``models/``. Skipped if none has
+  been trained, so a fresh checkout does not fail with a confusing error.
+* ``modelless_app`` — no bundle at all, to prove the degraded path behaves.
+
+Every test gets its own SQLite file in a tmp directory, so nothing touches a
+developer's real database.
 """
+
+from __future__ import annotations
 
 import os
 import sys
-import tempfile
+from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-# app.py instantiates the application at module scope (the WSGI entrypoint
-# gunicorn and Vercel expect), so importing it anywhere in the suite runs the
-# full startup path. Seed a safe development environment before that happens.
-# setdefault, so a real environment variable still wins.
-os.environ.setdefault("FLASK_ENV", "development")
-os.environ.setdefault("SECRET_KEY", "test-secret-key-not-used-in-production")
-os.environ.setdefault(
-    "DATABASE_PATH", os.path.join(tempfile.mkdtemp(prefix="loan-tests-"), "import.db")
-)
+from loanapp import create_app  # noqa: E402
+from loanapp.config import Config  # noqa: E402
+from loanapp.features import LoanApplication  # noqa: E402
+from loanapp.ml.registry import bundle_path  # noqa: E402
+from loanapp.security import limiter  # noqa: E402
 
-MODEL_DIR = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "models")
-)
-MODEL_ARTEFACTS = [
-    "loan_eligibility_model.pkl",
-    "feature_scaler.pkl",
-    "feature_columns.pkl",
-]
-
-# Tests needing a real prediction are skipped rather than failed when the
-# artefacts have not been built, so a fresh clone still gets a green run.
-models_available = all(
-    os.path.exists(os.path.join(MODEL_DIR, name)) for name in MODEL_ARTEFACTS
-)
-requires_model = pytest.mark.skipif(
-    not models_available,
-    reason="ML artefacts absent; run `python models/model_trainer.py`",
-)
+MODEL_DIR = str(Path(__file__).resolve().parent.parent / "models")
 
 
-@pytest.fixture
-def flask_app(tmp_path, monkeypatch):
-    """A fully configured app instance backed by a temporary database."""
-    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.db"))
-    monkeypatch.setenv("SECRET_KEY", "test-secret-key-not-used-in-production")
-    monkeypatch.setenv("ADMIN_PASSWORD", "test-admin-password")
-    monkeypatch.setenv("FLASK_ENV", "development")
-
-    # Reimported per test so setup_app/setup_database observe the patched env.
-    sys.modules.pop("app", None)
-    import app as app_module
-
-    instance = app_module.LoanEligibilityApp()
-    instance.app.config["TESTING"] = True
-    return instance
-
-
-@pytest.fixture
-def client(flask_app):
-    """Anonymous test client."""
-    return flask_app.app.test_client()
-
-
-@pytest.fixture
-def user_credentials():
-    return {
-        "user_id": "ada_lovelace",
-        "email": "ada@example.com",
-        "full_name": "Ada Lovelace",
-        "password": "CorrectHorse1",
-        "confirm_password": "CorrectHorse1",
-    }
-
-
-@pytest.fixture
-def auth_client(client, user_credentials):
-    """Test client with a registered, logged-in user session."""
-    assert client.post("/api/register", json=user_credentials).status_code == 200
-    response = client.post(
-        "/api/login",
-        json={
-            "user_id": user_credentials["user_id"],
-            "password": user_credentials["password"],
-        },
+def _config(tmp_path: Path, model_dir: str) -> Config:
+    return Config(
+        env="testing",
+        secret_key="test-secret-key-at-least-32-characters-long",
+        database_path=str(tmp_path / "test.db"),
+        model_dir=model_dir,
+        cookie_secure=False,
     )
-    assert response.status_code == 200
-    return client
+
+
+@pytest.fixture(autouse=True)
+def _reset_rate_limiter():
+    """The limiter is process-global; leaking counts between tests makes
+    unrelated tests fail once a suite grows."""
+    limiter.reset()
+    yield
+    limiter.reset()
 
 
 @pytest.fixture
-def loan_application():
-    """A well-formed application that passes validation."""
-    return {
-        "first_name": "Ada",
-        "last_name": "Lovelace",
-        "gender": 1,
-        "married": 1,
-        "dependents": 2,
-        "education": 0,
-        "self_employed": 0,
-        "property_area": 2,
-        "credit_history": 1.0,
-        "cibil_score": 750,
-        "applicant_income": 5000,
-        "coapplicant_income": 1500,
-        "loan_amount": 150,
-        "loan_amount_term": 360,
-    }
+def trained_model_dir() -> str:
+    if not os.path.exists(bundle_path(MODEL_DIR)):
+        pytest.skip("No trained model. Run: python -m loanapp.ml.train")
+    return MODEL_DIR
+
+
+@pytest.fixture
+def app(tmp_path, trained_model_dir):
+    return create_app(_config(tmp_path, trained_model_dir))
+
+
+@pytest.fixture
+def client(app):
+    return app.test_client()
+
+
+@pytest.fixture
+def modelless_app(tmp_path):
+    """An app with no model bundle, for testing the degraded path."""
+    empty = tmp_path / "no-models"
+    empty.mkdir()
+    return create_app(_config(tmp_path, str(empty)))
+
+
+@pytest.fixture
+def assessor(app):
+    return app.extensions["assessor"]
+
+
+@pytest.fixture
+def sample_application() -> LoanApplication:
+    return LoanApplication(
+        applicant_income=50_000,
+        coapplicant_income=20_000,
+        loan_amount=2_000_000,
+        loan_term_months=240,
+        credit_history=1,
+        dependents=1,
+        education="graduate",
+        self_employed=False,
+        property_area="urban",
+        cibil_score=740,
+    )
+
+
+@pytest.fixture
+def registered_client(client):
+    """A client with a signed-in user, plus that user's CSRF token."""
+    token = client.get("/api/csrf-token").get_json()["data"]["csrf_token"]
+    response = client.post(
+        "/register",
+        data={
+            "user_id": "testuser",
+            "email": "test@example.com",
+            "full_name": "Test User",
+            "password": "correct-horse-battery",
+            "confirm_password": "correct-horse-battery",
+            "csrf_token": token,
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code in (201, 302), response.data
+    client.csrf = client.get("/api/csrf-token").get_json()["data"]["csrf_token"]
+    return client

@@ -1,0 +1,100 @@
+name: CI
+
+# The previous workflow ran `pytest -q || true`, so it was permanently green
+# and never installed the test dependencies. Nothing here swallows a failure.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: |
+          ruff check loanapp tests app.py
+          ruff format --check loanapp tests app.py
+
+      - name: Test
+        run: pytest --cov=loanapp --cov-report=term-missing
+
+  train:
+    # Training is the part most likely to break silently: it is the only thing
+    # that proves the committed model bundle still matches the feature contract
+    # in the code, and that the model card's numbers can be reproduced.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Train from scratch
+        run: FLASK_ENV=development python -m loanapp.ml.train --model-dir /tmp/ci-models --no-docs
+
+      - name: Assert the retrained model still satisfies the product invariants
+        run: |
+          python - <<'PY'
+          import json, sys
+
+          metrics = json.load(open("/tmp/ci-models/metrics.json"))
+
+          failures = []
+
+          # A model that scores a smaller loan worse cannot back the guidance
+          # feature, whatever its AUC.
+          if not metrics["served_model_monotonicity"]["monotonic"]:
+              failures.append("served model is not monotonic in loan amount")
+
+          # Beating the always-approve baseline is the floor, not the goal.
+          auc = metrics["holdout_calibrated"]["roc_auc"]
+          if auc < 0.70:
+              failures.append(f"holdout ROC-AUC {auc} below the 0.70 floor")
+
+          # Guards against a feature-set change landing without a retrain.
+          from loanapp.features import FEATURE_COLUMNS
+          if tuple(metrics["feature_columns"]) != FEATURE_COLUMNS:
+              failures.append("metrics feature list disagrees with the code")
+
+          if failures:
+              print("\n".join(f"FAIL: {f}" for f in failures))
+              sys.exit(1)
+          print(f"OK — ROC-AUC {auc}, monotonic, contract matches")
+          PY
+
+      - name: Check the committed bundle is not stale
+        run: |
+          python - <<'PY'
+          from loanapp.features import FEATURE_COLUMNS
+          from loanapp.ml.registry import load_bundle, ModelUnavailable
+          try:
+              bundle = load_bundle("models")
+          except ModelUnavailable:
+              raise SystemExit("No committed model bundle in models/")
+          assert tuple(bundle.feature_columns) == FEATURE_COLUMNS
+          print(f"Committed bundle {bundle.version} matches the contract")
+          PY

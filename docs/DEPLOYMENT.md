@@ -1,0 +1,223 @@
+# Deployment
+
+## The short version
+
+**Deploy the container.** The application is stateful — accounts, saved
+applications, an admin view — and a container gives it a real filesystem and a
+persistent volume.
+
+Vercel still works, but only as a **stateless demo**. That is a real constraint,
+not a configuration problem, and the reasoning is below.
+
+---
+
+## Required configuration
+
+| Variable | Required | Notes |
+|---|---|---|
+| `SECRET_KEY` | **yes, in production** | ≥32 chars. The app refuses to start without it. |
+| `FLASK_ENV` | yes | `production` \| `development` \| `testing` |
+| `DATABASE_PATH` | no | Defaults to `./loanwise.db`, or `/tmp/loanwise.db` on serverless |
+| `MODEL_DIR` | no | Defaults to `./models` |
+| `TRUSTED_PROXY` | only behind a proxy | Makes rate limiting trust `X-Forwarded-For` |
+| `SESSION_COOKIE_SECURE` | no | Defaults to true in production |
+| `ANNUAL_INTEREST_RATE` | no | Fraction, e.g. `0.105`. Affordability reference rate. |
+| `APPROVE_THRESHOLD` / `BORDERLINE_THRESHOLD` | no | Decision bands, `0 < borderline < approve < 1` |
+
+Generate a secret key:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+**There is no fallback.** The previous version defaulted to `os.urandom(24)`,
+which looks secure and silently breaks every session the moment a second worker
+starts with a different key — an intermittent "randomly logged out" bug that is
+miserable to diagnose. Failing at boot with a message is better.
+
+---
+
+## Docker (recommended)
+
+```bash
+docker build -t loanwise .
+
+docker run -d --name loanwise -p 8000:8000 \
+  -e SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" \
+  -e FLASK_ENV=production \
+  -v loanwise-data:/data \
+  loanwise
+```
+
+The image runs as a non-root user, serves via gunicorn, and includes a
+healthcheck. `/data` is the volume mount — the database lives there so it
+survives a container replacement.
+
+Create the first administrator:
+
+```bash
+docker exec -it loanwise flask --app app create-admin \
+  --user-id admin --email admin@example.com
+```
+
+Behind a reverse proxy, set `TRUSTED_PROXY=1` so rate limiting reads the real
+client IP. Do **not** set it when the app is directly exposed: `X-Forwarded-For`
+is trivially spoofable, and trusting it lets a caller mint a fresh rate-limit
+bucket per request.
+
+### Platforms this image runs on unchanged
+
+Fly.io, Render, Railway, Google Cloud Run, AWS App Runner, DigitalOcean App
+Platform, or any Kubernetes cluster. All of them offer a persistent volume,
+which is the only thing the app needs beyond a Python runtime.
+
+On **Cloud Run** specifically, note that instances are ephemeral and the local
+filesystem is not shared between them — treat it like the serverless case below
+and move to Postgres before running more than one instance.
+
+---
+
+## Vercel (demo only)
+
+`vercel.json` is configured and works:
+
+```bash
+vercel --prod
+# then set SECRET_KEY in the project's environment variables
+```
+
+### What works
+
+Anonymous assessment — the form, the result page, factor explanations, guidance,
+affordability, `/api/assess`, `/api/compare`, `/api/model-card`. This is the
+majority of the product's value, and it is genuinely fine here.
+
+### What does not
+
+Accounts, sign-in, saved applications, and the admin view. Two reasons, neither
+fixable by configuration:
+
+1. **The filesystem is read-only outside `/tmp`.** SQLite cannot open a
+   writable database anywhere else.
+2. **`/tmp` does not persist.** It is destroyed on cold start and is not shared
+   between concurrent lambda instances. A user can register and be signed out
+   moments later because the next request landed on a different instance whose
+   database has never heard of them.
+
+The app detects a serverless environment, defaults `DATABASE_PATH` to `/tmp`, and
+logs a warning at startup. It does not pretend the data persists.
+
+### Also worth knowing
+
+The 50 MB lambda bundle limit is tight with pandas and scikit-learn. It fits
+today, and adding a large dependency may break it.
+
+### The honest recommendation
+
+If you want a public demo link and nothing else, Vercel is a reasonable choice —
+just present it as a demo. If you want accounts and history, deploy the
+container. Trying to force durable state onto a read-only ephemeral filesystem
+is the mismatch, not a bug to work around.
+
+---
+
+## Postgres migration
+
+SQLite is the right choice for a single container at this scale. Move when any
+of these becomes true:
+
+- More than one application instance needs to write
+- Concurrent writes are producing `database is locked` errors
+- You need point-in-time recovery or a managed backup story
+- The applications table passes a few million rows
+
+The work is contained: `loanapp/db.py` holds every SQL statement, all
+parameterised, all behind two repository classes. The blueprints never touch
+SQL. A port means rewriting that one module and swapping `connect()` for a
+connection pool — the domain and HTTP layers are untouched.
+
+The schema is deliberately narrow (JSON payload plus indexed columns) precisely
+so this port stays small.
+
+---
+
+## Model artifacts
+
+The trained bundle (`models/loan_model.joblib`, ~1 MB) is **committed to the
+repository**. This is a deliberate trade:
+
+- **For:** the app works immediately after clone, and CI can verify that the
+  committed bundle still matches the feature contract in the code.
+- **Against:** a binary in git history, and the bundle must be regenerated
+  whenever `FEATURE_COLUMNS` changes.
+
+CI guards the failure mode. If you change the feature set without retraining,
+`test_registry.py` fails and the `train` job fails.
+
+At larger scale, move to a model registry (MLflow, S3 with versioned keys) and
+fetch at startup. The bundle already carries a version string and metadata, so
+the loader would barely change.
+
+**Security note:** `joblib.load` executes pickled code. Only point `MODEL_DIR` at
+artifacts you produced yourself or fetched over a channel you trust.
+
+---
+
+## Operations
+
+### Health
+
+`GET /api/health` returns:
+
+```json
+{
+  "status": "ok",
+  "app_version": "2.0.0",
+  "model_status": "ready",
+  "model": { "version": "…", "calibrated": true, "metrics": { … } }
+}
+```
+
+It returns **200 even when no model is loaded** (`"status": "degraded"`). That is
+deliberate: the process is alive, everything except assessment works, and
+restarting will not conjure a model. Use `status`, not the HTTP code, to alert on
+model availability.
+
+`model_status` values:
+
+| Value | Meaning | Action |
+|---|---|---|
+| `ready` | Serving normally | — |
+| `unavailable` | No bundle found | Run the trainer, redeploy |
+| `contract_mismatch` | Bundle disagrees with the code | **Deployment error.** Retrain and redeploy. |
+
+`contract_mismatch` means someone shipped code whose feature set differs from
+the deployed model. The app refuses to serve rather than scoring a mis-aligned
+vector — which is the exact failure this design exists to prevent.
+
+### What to monitor
+
+- `/api/health` → `status` and `model_status`
+- `/admin/stats` → outcome mix. A sharp shift with no model change usually means
+  the input population changed, which is worth investigating.
+- Log lines matching `rate limit hit` — sustained hits suggest scraping or
+  credential stuffing.
+- Log lines matching `admin access denied`.
+
+### Backups
+
+```bash
+docker exec loanwise sqlite3 /data/loanwise.db ".backup '/data/backup.db'"
+docker cp loanwise:/data/backup.db ./backup-$(date +%F).db
+```
+
+Use `.backup`, not a file copy — the database runs in WAL mode and a naive copy
+can capture a torn state.
+
+### Scaling
+
+One container handles this workload comfortably; scoring a calibrated linear
+model is sub-millisecond and the model is loaded once per worker.
+
+Before adding instances, move to Postgres. SQLite has a single writer, and two
+instances pointed at the same volume will produce lock contention.

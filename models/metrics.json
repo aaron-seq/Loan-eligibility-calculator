@@ -1,0 +1,194 @@
+{
+  "generated_at": "2026-07-29T06:22:34+00:00",
+  "dataset": {
+    "path": "data/train.csv",
+    "sha256_prefix": "3ac62ced374efaf4",
+    "rows": 614,
+    "approval_rate": 0.6873,
+    "holdout_rows": 123
+  },
+  "selected_model": "logistic_regression",
+  "calibrated": true,
+  "cross_validation": {
+    "logistic_regression": {
+      "roc_auc_mean": 0.7283942597260378,
+      "roc_auc_std": 0.05383860083280431,
+      "roc_auc_ci95": [
+        0.6336245952401183,
+        0.8203480344954545
+      ],
+      "accuracy_mean": 0.7423366316223459,
+      "accuracy_std": 0.03458197002358459
+    },
+    "random_forest": {
+      "roc_auc_mean": 0.7393370552361532,
+      "roc_auc_std": 0.05379882095559588,
+      "roc_auc_ci95": [
+        0.6286591237361581,
+        0.8266230104222719
+      ],
+      "accuracy_mean": 0.7428519892805607,
+      "accuracy_std": 0.03543399697326122
+    }
+  },
+  "monotonicity": {
+    "logistic_regression": {
+      "comparisons": 216,
+      "violations": 0,
+      "material_violations": 0,
+      "worst_drop": 0.0,
+      "tolerance": 0.005,
+      "monotonic": true
+    },
+    "random_forest": {
+      "comparisons": 216,
+      "violations": 36,
+      "material_violations": 30,
+      "worst_drop": 0.0999,
+      "tolerance": 0.005,
+      "monotonic": false
+    }
+  },
+  "served_model_monotonicity": {
+    "comparisons": 216,
+    "violations": 0,
+    "material_violations": 0,
+    "worst_drop": 0.0,
+    "tolerance": 0.005,
+    "monotonic": true
+  },
+  "holdout_uncalibrated": {
+    "threshold": 0.65,
+    "roc_auc": 0.7957,
+    "pr_auc": 0.889,
+    "brier_score": 0.181,
+    "accuracy": 0.5935,
+    "precision": 0.8889,
+    "recall": 0.4706,
+    "f1": 0.6154,
+    "confusion_matrix": {
+      "true_negative": 33,
+      "false_positive": 5,
+      "false_negative": 45,
+      "true_positive": 40
+    },
+    "reliability": [
+      {
+        "bin": "0.0-0.2",
+        "n": 11,
+        "mean_predicted": 0.1381,
+        "observed_rate": 0.2727
+      },
+      {
+        "bin": "0.2-0.4",
+        "n": 18,
+        "mean_predicted": 0.2641,
+        "observed_rate": 0.2778
+      },
+      {
+        "bin": "0.4-0.6",
+        "n": 27,
+        "mean_predicted": 0.5311,
+        "observed_rate": 0.7407
+      },
+      {
+        "bin": "0.6-0.8",
+        "n": 67,
+        "mean_predicted": 0.6918,
+        "observed_rate": 0.8507
+      },
+      {
+        "bin": "0.8-1.0",
+        "n": 0
+      }
+    ]
+  },
+  "holdout_calibrated": {
+    "threshold": 0.65,
+    "roc_auc": 0.8031,
+    "pr_auc": 0.8934,
+    "brier_score": 0.1702,
+    "accuracy": 0.7967,
+    "precision": 0.8191,
+    "recall": 0.9059,
+    "f1": 0.8603,
+    "confusion_matrix": {
+      "true_negative": 21,
+      "false_positive": 17,
+      "false_negative": 8,
+      "true_positive": 77
+    },
+    "reliability": [
+      {
+        "bin": "0.0-0.2",
+        "n": 0
+      },
+      {
+        "bin": "0.2-0.4",
+        "n": 4,
+        "mean_predicted": 0.3956,
+        "observed_rate": 0.25
+      },
+      {
+        "bin": "0.4-0.6",
+        "n": 23,
+        "mean_predicted": 0.49,
+        "observed_rate": 0.3043
+      },
+      {
+        "bin": "0.6-0.8",
+        "n": 76,
+        "mean_predicted": 0.7384,
+        "observed_rate": 0.7632
+      },
+      {
+        "bin": "0.8-1.0",
+        "n": 20,
+        "mean_predicted": 0.8165,
+        "observed_rate": 0.95
+      }
+    ]
+  },
+  "fairness_audit": {
+    "Gender": {
+      "Female": {
+        "n": 25,
+        "approval_rate": 0.64
+      },
+      "Male": {
+        "n": 96,
+        "approval_rate": 0.7917
+      },
+      "max_gap": 0.1517
+    },
+    "Married": {
+      "No": {
+        "n": 44,
+        "approval_rate": 0.6818
+      },
+      "Yes": {
+        "n": 79,
+        "approval_rate": 0.8101
+      },
+      "max_gap": 0.1283
+    }
+  },
+  "protected_attribute_ablation": {
+    "roc_auc_without_protected": 0.7466,
+    "roc_auc_with_protected": 0.7438,
+    "cost_of_exclusion": -0.0027
+  },
+  "feature_columns": [
+    "credit_history",
+    "total_income_log",
+    "loan_term_months",
+    "loan_to_income_ratio",
+    "emi_to_income_ratio",
+    "coapplicant_share",
+    "dependents",
+    "is_graduate",
+    "is_self_employed",
+    "property_area_semiurban",
+    "property_area_urban"
+  ]
+}
