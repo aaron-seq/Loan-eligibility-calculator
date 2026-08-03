@@ -36,7 +36,9 @@
                     Fill in your details below to get a prediction.
                 </p>
             </div>
-            <form class="mt-8" action="/api/predict" method="post">
+            <div id="result" class="hidden mt-8 p-6 rounded-lg text-center" role="status" aria-live="polite"></div>
+
+            <form id="predictForm" class="mt-8" action="/api/predict" method="post" onsubmit="handlePredict(event)">
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <!-- Personal Information -->
                     <div>
@@ -126,12 +128,65 @@
                 </div>
 
                 <div class="mt-8">
-                    <button type="submit" class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
+                    <button type="submit" id="submitBtn" class="group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
                         Check Eligibility
                     </button>
                 </div>
             </form>
         </div>
     </div>
+
+    <script>
+    async function handlePredict(event) {
+        event.preventDefault();
+        const btn = document.getElementById('submitBtn');
+        const box = document.getElementById('result');
+
+        btn.disabled = true;
+        btn.textContent = 'Checking...';
+        box.className = 'mt-8 p-6 rounded-lg text-center bg-gray-100 text-gray-700';
+        box.textContent = 'Evaluating your application...';
+
+        try {
+            const response = await fetch('/api/predict', {
+                method: 'POST',
+                body: new FormData(event.target)
+            });
+            const result = await response.json();
+
+            if (response.status === 401) {
+                box.className = 'mt-8 p-6 rounded-lg text-center bg-yellow-100 text-yellow-800';
+                box.textContent = 'Your session expired. Redirecting to sign in...';
+                setTimeout(() => window.location.href = '/', 1500);
+                return;
+            }
+
+            if (result.success) {
+                const approved = result.prediction === 'APPROVED';
+                box.className = 'mt-8 p-6 rounded-lg text-center ' +
+                    (approved ? 'bg-green-100' : 'bg-red-100');
+                box.innerHTML =
+                    '<p class="text-lg font-medium ' + (approved ? 'text-green-800' : 'text-red-800') + '">' +
+                    'Your loan application is likely to be:</p>' +
+                    '<p class="text-5xl font-extrabold mt-2 ' + (approved ? 'text-green-600' : 'text-red-600') + '">' +
+                    result.prediction + '</p>' +
+                    '<p class="text-sm text-gray-600 mt-4">Confidence: <span class="font-bold">' +
+                    result.confidence.toFixed(2) + '%</span></p>' +
+                    '<p class="text-xs text-gray-500 mt-4">This is a machine-learning estimate, not a lending ' +
+                    'decision. The final decision rests with the financial institution.</p>';
+            } else {
+                box.className = 'mt-8 p-6 rounded-lg text-center bg-yellow-100 text-yellow-800';
+                box.textContent = result.message || 'Prediction failed. Please check your inputs.';
+            }
+        } catch (error) {
+            box.className = 'mt-8 p-6 rounded-lg text-center bg-red-100 text-red-800';
+            box.textContent = 'Could not reach the prediction service. Please try again.';
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Check Eligibility';
+            box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+    </script>
 </body>
 </html>

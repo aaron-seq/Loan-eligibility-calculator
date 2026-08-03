@@ -1,413 +1,343 @@
-# Enhanced Loan Eligibility Prediction System
+# Loan Eligibility Prediction System
 
-A modern, production-ready Flask web application for predicting loan eligibility using machine learning. This system features a clean architecture, modern UI, secure authentication, and is optimized for both local development and cloud deployment.
+A Flask web application that predicts loan eligibility from an applicant's
+financial and demographic details, using a Random Forest trained on the classic
+loan-prediction dataset in [data/train.csv](data/train.csv).
 
-![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)
-![Flask](https://img.shields.io/badge/Flask-3.0.0-green.svg)
+![Python](https://img.shields.io/badge/Python-3.11%20%7C%203.13-blue.svg)
+![Flask](https://img.shields.io/badge/Flask-3.x-green.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
-![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen.svg)
 
-## Features
+> **This is a demonstration project, not a lending system.** Predictions come
+> from a model trained on 614 historical records and must not be used to make
+> real credit decisions. See [Model honesty](#model-honesty) for what the model
+> does and does not actually know.
 
-### Core Functionality
-- **Advanced ML Prediction**: RandomForest model with hyperparameter optimization
-- **Feature Engineering**: Advanced feature engineering including CIBIL scores, loan-to-income ratios
-- **Real-time Predictions**: Instant loan eligibility predictions with confidence scores
+## Contents
 
-### User Experience
-- **Modern UI**: Responsive design with Tailwind CSS
-- **Secure Authentication**: User registration and login with password hashing
-- **Admin Dashboard**: Administrative panel for viewing all predictions
-- **Mobile Responsive**: Works seamlessly on all devices
+- [Quick start](#quick-start)
+- [How it works](#how-it-works)
+- [Configuration](#configuration)
+- [API](#api)
+- [Model honesty](#model-honesty)
+- [Testing](#testing)
+- [Deployment](#deployment)
+- [Project structure](#project-structure)
+- [Troubleshooting](#troubleshooting)
 
-### Technical Excellence
-- **SQLite Database**: Lightweight, deployment-friendly database
-- **RESTful API**: Clean API endpoints for frontend integration
-- **Error Handling**: Comprehensive error handling and logging
-- **Health Monitoring**: Built-in health check endpoints
-- **Security**: Secure session management and password hashing
+## Quick start
 
-### Deployment Ready
-- **Vercel Compatible**: Optimized for serverless deployment
-- **Environment Configuration**: Flexible environment-based configuration
-- **Production Optimized**: Ready for production deployment
-
-## Prerequisites
-
-Before running this application, ensure you have:
-
-- **Python 3.8+** installed on your system
-- **pip** (Python package manager)
-- **Git** (for cloning the repository)
-- **Node.js** (optional, for Vercel CLI deployment)
-
-## Local Development Setup
-
-### Step 1: Clone the Repository
+Requires **Python 3.11+**.
 
 ```bash
-# Clone the repository
-git clone https://github.com/aaronseq12/Loan-eligibility-calculator.git
+git clone https://github.com/aaron-seq/Loan-eligibility-calculator.git
 cd Loan-eligibility-calculator
-```
 
-### Step 2: Create Virtual Environment
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
 
-```bash
-# Create virtual environment
-python -m venv loan_env
-
-# Activate virtual environment
-# On Windows:
-loan_env\Scripts\activate
-# On macOS/Linux:
-source loan_env/bin/activate
-```
-
-### Step 3: Install Dependencies
-
-```bash
-# Install required packages
 pip install -r requirements.txt
 ```
 
-### Step 4: Environment Configuration
+**Train the model. This step is required, not optional** — the `.pkl` artefacts
+are not committed, and without them `/api/predict` returns `503`:
 
 ```bash
-# Create environment file from template
-cp .env.example .env
-
-# Edit the .env file with your preferred settings
-# The default values should work for local development
+python models/model_trainer.py    # ~1-2 minutes (grid search over 162 candidates)
 ```
 
-### Step 5: Initialize the Database
-
-The application will automatically create the SQLite database and tables on first run. No manual database setup required!
-
-### Step 6: Train the ML Model (Optional)
+Then configure and run:
 
 ```bash
-# Navigate to models directory
-cd models
-
-# Run the model trainer (this will take a few minutes)
-python model_trainer.py
-
-# Return to main directory
-cd ..
-```
-
-**Note**: Pre-trained models are included in the repository, so this step is optional for testing.
-
-### Step 7: Run the Application
-
-```bash
-# Start the Flask application
+cp .env.example .env    # Windows: copy .env.example .env
 python app.py
 ```
 
-The application will be available at: **http://localhost:5000**
+The app starts on <http://localhost:5000>. The SQLite database and its tables
+are created automatically on first run.
 
-## Using the Application
+With `FLASK_ENV=development` (the default in `.env.example`) the app seeds an
+admin account `admin` / `admin123` and prints a warning. Set `ADMIN_PASSWORD`
+to choose your own.
 
-### For Users
+## How it works
 
-1. **Registration**: Navigate to `/signup` to create a new account
-2. **Login**: Use your credentials to log in at the home page
-3. **Prediction**: Fill out the loan application form in the dashboard
-4. **Results**: View your loan eligibility prediction with confidence score
-
-### For Administrators
-
-1. **Admin Login**: Navigate to `/admin-login`
-2. **Default Credentials**: 
-   - Username: `admin`
-   - Password: `admin123`
-3. **Dashboard**: View all user predictions and statistics
-
-### API Endpoints
-
-- `GET /api/health` - Health check endpoint
-- `POST /api/login` - User authentication
-- `POST /api/register` - User registration
-- `POST /api/predict` - Loan prediction
-- `POST /api/admin/login` - Admin authentication
-
-## Model Information
-
-### Algorithm
-- **Primary Model**: Random Forest Classifier
-- **Hyperparameter Optimization**: Grid Search with Cross-Validation
-- **Feature Engineering**: Advanced feature engineering with 18+ features
-
-### Features Used
-- Applicant Income (log-transformed)
-- Co-applicant Income (log-transformed)
-- Loan Amount (log-transformed)
-- Loan Term
-- Credit History
-- CIBIL Score
-- Loan-to-Income Ratio
-- EMI Feature
-- Demographic factors (Gender, Marital Status, Dependents, Education)
-- Employment Status
-- Property Area
-
-### Performance Metrics
-- **Accuracy**: ~85-90% on test data
-- **Cross-Validation Score**: Optimized through grid search
-- **Confidence Scoring**: Probability-based confidence levels
-
-## Deployment
-
-### Vercel Deployment (Recommended)
-
-1. **Install Vercel CLI**
-```bash
-npm install -g vercel
+```mermaid
+flowchart LR
+    A[Browser form] -->|POST /api/predict| B[Flask route]
+    B --> C[Server-side validation]
+    C -->|400 on bad input| A
+    C --> D[Feature engineering]
+    D --> E[Reorder to feature_columns.pkl]
+    E --> F[StandardScaler]
+    F --> G[RandomForest]
+    G --> H[(SQLite audit row)]
+    G -->|decision + confidence| A
 ```
 
-2. **Login to Vercel**
-```bash
-vercel login
-```
+The step that matters is **"Reorder to `feature_columns.pkl`"**. The scaler is
+fitted on a pandas DataFrame, so scikit-learn validates both the column *names*
+and their *order* at `transform()` time. `models/model_trainer.py` persists the
+exact training order alongside the model, and `app.py` reindexes to it rather
+than hardcoding a list that can silently drift out of sync.
 
-3. **Deploy**
-```bash
-# Deploy to production
-vercel --prod
-```
+### Request lifecycle
 
-4. **Set Environment Variables**
-   - Go to Vercel Dashboard → Your Project → Settings → Environment Variables
-   - Add `SECRET_KEY` with a secure random string
-   - Add `FLASK_ENV=production`
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant F as Flask
+    participant D as SQLite
+    participant M as Model
 
-### Other Deployment Options
+    U->>F: POST /api/login
+    F->>D: SELECT user by id
+    D-->>F: password_hash
+    F->>F: check_password_hash
+    F-->>U: session cookie (HttpOnly, SameSite=Lax)
 
-The application is compatible with:
-- **Heroku**: Add `Procfile` with `web: gunicorn app:app`
-- **Railway**: Direct deployment from GitHub
-- **DigitalOcean App Platform**: Compatible with Python buildpack
-- **AWS Lambda**: Can be adapted for serverless deployment
-
-## Project Structure
-
-```
-Loan-eligibility-calculator/
-│
-├── app.py                          # Main Flask application
-├── requirements.txt                # Python dependencies
-├── vercel.json                    # Vercel deployment config
-├── .env.example                   # Environment variables template
-├── README.md                      # This file
-│
-├── models/                        # ML models and training
-│   ├── model_trainer.py          # Enhanced model training script
-│   ├── loan_eligibility_model.pkl # Trained model (auto-generated)
-│   ├── feature_scaler.pkl        # Feature scaler (auto-generated)
-│   └── feature_columns.pkl       # Feature columns (auto-generated)
-│
-├── templates/                     # HTML templates
-│   ├── base.html                 # Base template with modern design
-│   ├── auth/
-│   │   ├── login.html           # User login page
-│   │   └── signup.html          # User registration page
-│   ├── dashboard/
-│   │   └── home.html            # User dashboard
-│   └── admin/
-│       ├── login.html           # Admin login page
-│       └── dashboard.html       # Admin dashboard
-│
-├── static/                        # Static files
-│   ├── css/                      # Custom stylesheets
-│   ├── js/
-│   │   └── common.js            # Common JavaScript utilities
-│   └── images/                   # Application images
-│
-└── data/                         # Training data and notebooks
-    ├── train.csv                 # Training dataset
-    ├── test.csv                  # Test dataset
-    └── *.ipynb                   # Jupyter notebooks
+    U->>F: POST /api/predict
+    F->>F: require_login
+    F->>F: validate 12 numeric fields + 2 names
+    F->>M: scaled feature vector
+    M-->>F: class + probability
+    F->>D: INSERT loan_predictions
+    F-->>U: {prediction, confidence}
 ```
 
 ## Configuration
 
-### Environment Variables
+All settings come from environment variables, read from `.env` if present.
+See [.env.example](.env.example).
 
-Create a `.env` file in the root directory:
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `FLASK_ENV` | `production` | `development` relaxes the checks below and enables the debugger. |
+| `SECRET_KEY` | none | **Required unless `FLASK_ENV=development`.** The app refuses to start without it. |
+| `ADMIN_USERNAME` | `admin` | Seeded on first run only. |
+| `ADMIN_PASSWORD` | none | Unset → dev seeds `admin123`; production creates **no** admin account. |
+| `DATABASE_PATH` | `loan_prediction.db` | Must be in a writable directory. |
+| `MODEL_PATH` | `models` | Directory holding the three `.pkl` artefacts. |
+| `PORT` | `5000` | |
 
-```env
-# Application Configuration
-FLASK_ENV=development
-SECRET_KEY=your-super-secret-key-here
-PORT=5000
+### Security behaviour
 
-# Database Configuration
-DATABASE_PATH=loan_prediction.db
+- Passwords are hashed with Werkzeug's PBKDF2; plaintext is never stored.
+- Session cookies are `HttpOnly` and `SameSite=Lax`, and `Secure` outside
+  development. Sessions expire after 1 hour.
+- The session is cleared on login so a pre-login cookie cannot be carried
+  across the privilege boundary.
+- An unset `SECRET_KEY` in production is a hard startup failure rather than a
+  silent fallback to a per-process random key, which would log every user out
+  on each restart and give each worker a different key.
+- An unset `ADMIN_PASSWORD` in production creates no admin account, rather than
+  one with a password published in this README.
 
-# Model Configuration
-MODEL_PATH=models
+## API
+
+| Method | Path | Auth | Purpose |
+| --- | --- | --- | --- |
+| `GET` | `/api/health` | — | Liveness plus per-dependency status. `503` if degraded. |
+| `POST` | `/api/register` | — | Create an account. |
+| `POST` | `/api/login` | — | Start a user session. |
+| `POST` | `/api/predict` | user | Score a loan application. |
+| `POST` | `/api/admin/login` | — | Start an admin session. |
+| `GET` | `/dashboard` | user | Prediction form. |
+| `GET` | `/admin/dashboard` | admin | All predictions. |
+| `GET` | `/logout`, `/admin/logout` | — | End the session. |
+
+All `POST` endpoints accept either JSON or form-encoded bodies.
+
+```bash
+curl http://localhost:5000/api/health
+
+curl -X POST http://localhost:5000/api/register \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"ada_l","email":"ada@example.com","full_name":"Ada Lovelace",
+       "password":"CorrectHorse1","confirm_password":"CorrectHorse1"}'
 ```
 
-### Security Configuration
+### Validation
 
-- **Secret Key**: Generate a secure secret key for session management
-- **Password Hashing**: Uses Werkzeug's secure password hashing
-- **Session Security**: Secure session configuration for production
+Every prediction field is validated server-side; the first failure returns
+`400` with a message naming the field. Missing fields are rejected rather than
+defaulted, so a blank form cannot produce a confident prediction.
+
+| Field | Accepted |
+| --- | --- |
+| `first_name`, `last_name` | 1–50 chars, letters/spaces/apostrophes/hyphens |
+| `gender`, `married`, `education`, `self_employed` | `0` or `1` |
+| `dependents` | `0`–`5` |
+| `property_area` | `0` rural, `1` semi-urban, `2` urban |
+| `credit_history` | `0.0`–`1.0` |
+| `cibil_score` | `300`–`900` |
+| `applicant_income` | `1`–`100,000,000` |
+| `coapplicant_income` | `0`–`100,000,000` |
+| `loan_amount` | `1`–`50,000,000`, and ≤ 50× total monthly income |
+| `loan_amount_term` | `1`–`480` months |
+
+Usernames are 3–50 characters of `[a-zA-Z0-9_]`, stored lowercase. Passwords
+must be at least 8 characters.
+
+## Model honesty
+
+**Algorithm.** `RandomForestClassifier`, hyperparameters chosen by 5-fold
+`GridSearchCV` over 162 candidates. Trained on 614 rows, 22 features.
+
+**Measured performance** on the held-out 20% split (`random_state=42`):
+
+| Metric | Value |
+| --- | --- |
+| Test accuracy | 0.90 |
+| Cross-validated accuracy | 0.80 |
+| Precision / recall (approved) | 0.89 / 0.98 |
+| Precision / recall (rejected) | 0.93 / 0.74 |
+
+The gap between CV (0.80) and test (0.90) accuracy on a 123-row test set means
+the headline number carries real variance — treat 0.80 as the honest estimate.
+The model is also much better at confirming approvals than catching rejections.
+
+### The CIBIL score field is synthetic
+
+`data/train.csv` has no CIBIL column. `models/model_trainer.py` fabricates one
+with `np.random.randint(300, 850)` — a random number uncorrelated with the
+label — and trains on it.
+
+The model did not ignore that noise. It ranks **5th of 22 features** by
+importance (0.063), because a continuous random variable offers a Random Forest
+many split points to overfit. Sweeping the field with everything else held
+fixed:
+
+| CIBIL input | Decision | Confidence |
+| --- | --- | --- |
+| 300 | APPROVED | 69.35% |
+| 500 | APPROVED | 81.21% |
+| 800 | APPROVED | 85.33% |
+| 900 | APPROVED | 82.19% |
+
+So the field visibly moves the output — by up to 16 percentage points, and
+non-monotonically (900 scores *lower* than 800). **That movement encodes
+nothing but the training seed's random draw.** A user entering their real CIBIL
+score gets a response that looks sensitive to it and is not.
+
+The form also accepts 300–900 while training only covered 300–850, so the top
+of the range is outside the model's support entirely.
+
+The field is kept because the form, database schema and feature vector are all
+built around it. Removing it, or training on data that contains a real credit
+score, both require retraining — neither is a UI-only change.
+
+`Credit_History` (importance 0.282, 4× the next feature) is what genuinely
+drives the approve/reject decision, as the sweep above shows: flipping it to
+`0.0` turns every one of those rows into a rejection.
 
 ## Testing
 
-### Manual Testing
-
-1. **User Registration and Login**
-   - Test user registration with various inputs
-   - Verify login functionality
-   - Test password validation
-
-2. **Loan Prediction**
-   - Test with different loan scenarios
-   - Verify prediction accuracy
-   - Test edge cases and invalid inputs
-
-3. **Admin Functionality**
-   - Test admin login
-   - Verify prediction viewing
-   - Test admin dashboard functionality
-
-### API Testing
-
-Use tools like Postman or curl to test API endpoints:
-
 ```bash
-# Health check
-curl http://localhost:5000/api/health
-
-# User registration
-curl -X POST http://localhost:5000/api/register \
-  -H "Content-Type: application/json" \
-  -d '{"user_id":"testuser","email":"test@example.com","full_name":"Test User","password":"password123","confirm_password":"password123"}'
+pip install pytest pytest-cov
+python models/model_trainer.py   # prediction tests skip without artefacts
+pytest
 ```
 
-## 🤝 Contributing
+65 tests covering the feature-order contract, input validation, authentication,
+session boundaries and configuration. Coverage of `app.py` is 87%.
 
-We welcome contributions! Please follow these guidelines:
+Tests that need the trained model skip themselves when the artefacts are
+absent, so a fresh clone still runs green.
 
-1. **Fork the Repository**
-2. **Create a Feature Branch**: `git checkout -b feature/amazing-feature`
-3. **Commit Changes**: `git commit -m 'Add amazing feature'`
-4. **Push to Branch**: `git push origin feature/amazing-feature`
-5. **Open a Pull Request**
+## Deployment
 
-### Development Guidelines
+The app runs anywhere with a writable filesystem:
 
-- Follow PEP 8 Python style guide
-- Add proper error handling and logging
-- Write comprehensive docstrings
-- Test your changes thoroughly
-- Update documentation as needed
+```bash
+export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+export ADMIN_PASSWORD="choose-something"
+export FLASK_ENV=production
+python models/model_trainer.py
+gunicorn app:app
+```
 
-## 📝 License
+### Serverless caveat
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+`vercel.json` is present, but **SQLite does not work on Vercel**. The Python
+runtime's filesystem is read-only outside `/tmp`, so registration and
+prediction history fail; `/tmp` is per-instance and ephemeral, so anything
+written there disappears. The `.pkl` artefacts are also git-ignored, and Vercel
+has no build step configured to produce them.
+
+To deploy as-is, use a host with a real filesystem — Railway, Fly.io, Render,
+or any VM. Serverless deployment needs a network-backed database first. This is
+tracked in
+[issue #8](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/8).
+
+## Project structure
+
+```
+Loan-eligibility-calculator/
+├── app.py                     # The entire application: routes, validation, prediction
+├── requirements.txt
+├── pytest.ini
+├── vercel.json                # See the serverless caveat above
+├── .env.example
+│
+├── models/
+│   ├── model_trainer.py       # Training pipeline
+│   └── *.pkl                  # Generated, git-ignored
+│
+├── templates/
+│   ├── base.html
+│   ├── auth/{login,signup}.html
+│   ├── dashboard/home.html    # Prediction form
+│   └── admin/{login,dashboard}.html
+│
+├── static/js/common.js
+│
+├── tests/
+│   ├── conftest.py
+│   ├── test_auth.py           # Registration, login, session boundaries
+│   ├── test_config.py         # Security defaults, health
+│   └── test_predict.py        # Feature contract, validation
+│
+└── data/
+    ├── train.csv, test.csv
+    └── *.ipynb                # Original exploratory notebooks
+```
+
+`app.py` is deliberately a single module. At ~780 lines serving 5 endpoints, it
+does not need a service/repository/controller split — a previous attempt at one
+is described in the git history.
 
 ## Troubleshooting
 
-### Common Issues
+**`/api/predict` returns 503** — the model artefacts are missing. Run
+`python models/model_trainer.py`. Check `/api/health`, which reports
+`model_available` and `database_available` separately.
 
-1. **Import Errors**
-   ```bash
-   # Ensure virtual environment is activated
-   source loan_env/bin/activate  # macOS/Linux
-   loan_env\Scripts\activate    # Windows
+**App exits with `SECRET_KEY environment variable is required`** — expected
+outside development. Set `SECRET_KEY`, or set `FLASK_ENV=development` locally.
 
-   # Reinstall dependencies
-   pip install -r requirements.txt
-   ```
+**Admin login fails in production** — `ADMIN_PASSWORD` was unset on first run,
+so no admin account exists. Set it, delete the database file, and restart.
 
-2. **Database Issues**
-   ```bash
-   # Delete existing database and restart
-   rm loan_prediction.db
-   python app.py
-   ```
+**Model fails to load after upgrading scikit-learn** — pickled models are not
+portable across versions. Re-run `python models/model_trainer.py`.
 
-3. **Model Loading Errors**
-   ```bash
-   # Retrain the model
-   cd models
-   python model_trainer.py
-   cd ..
-   ```
+**Predictions look wrong after editing the trainer** — if you change the
+feature set, re-run the trainer so `feature_columns.pkl` is regenerated.
+`app.py` validates its feature set against that file and raises a descriptive
+error on mismatch.
 
-4. **Port Already in Use**
-   ```bash
-   # Use different port
-   export PORT=8000
-   python app.py
-   ```
+## Contributing
 
-### Getting Help
+1. Branch from `main`.
+2. Keep `pytest` green; add tests alongside behaviour changes.
+3. Follow PEP 8 and the existing structure.
 
-- **Issues**: Create an issue on GitHub for bugs or feature requests
-- **Discussions**: Use GitHub Discussions for questions and ideas
-- **Email**: Contact the maintainer for urgent issues
+## License
 
-## Performance Monitoring
+MIT — see [LICENSE](LICENSE).
 
-### Built-in Monitoring
-
-- **Health Check Endpoint**: `/api/health`
-- **Application Logging**: Comprehensive logging throughout the application
-- **Error Tracking**: Detailed error logging and user feedback
-
-### Production Monitoring
-
-For production deployments, consider integrating:
-- **Application Performance Monitoring** (APM) tools
-- **Error Tracking** services like Sentry
-- **Log Aggregation** services
-- **Uptime Monitoring** tools
-
-## Future Enhancements
-
-### Planned Features
-
-- **Enhanced ML Models**: XGBoost, Neural Networks
-- **Real-time CIBIL Integration**: Live CIBIL score fetching
-- **Document Upload**: Support for income and identity documents
-- **Email Notifications**: Automated email updates
-- **Advanced Analytics**: Detailed prediction analytics
-- **Mobile App**: React Native mobile application
-- **API Documentation**: Swagger/OpenAPI documentation
-
-### Technical Improvements
-
-- **Caching**: Redis caching for improved performance
-- **Microservices**: Break into microservices architecture
-- **Container Support**: Docker containerization
-- **CI/CD Pipeline**: Automated testing and deployment
-- **Load Testing**: Performance optimization
-
-## 📞 Support
-
-For support and questions:
-
-- **GitHub Issues**: [Create an issue](https://github.com/aaronseq12/Loan-eligibility-calculator/issues)
-- **Email**: aaronsequeira12@gmail.com
-- **LinkedIn**: Connect for professional inquiries
-
-## 🙏 Acknowledgments
-
-- **Scikit-learn**: For excellent machine learning tools
-- **Flask**: For the robust web framework
-- **Tailwind CSS**: For beautiful, responsive styling
-- **Vercel**: For seamless deployment platform
-- **Contributors**: Thanks to all contributors and testers
-
----
-
-**Built with ❤️ by Aaron Sequeira**
-
-*Happy Coding! 🚀*
+Built by Aaron Sequeira.

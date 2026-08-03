@@ -1,131 +1,112 @@
-"""Pytest Configuration and Fixtures
+"""Shared fixtures.
 
-Defines shared fixtures for testing.
+Every test runs against a throwaway SQLite file and a real Flask test client,
+so the request/response cycle under test is the one that ships.
 """
 
 import os
 import sys
-import pytest
 import tempfile
-import shutil
-from faker import Faker
 
-# Add src to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), ".." )))
+import pytest
 
-from src.repositories.user_repository import UserRepository
-from src.repositories.admin_repository import AdminRepository
-from src.repositories.prediction_repository import PredictionRepository
-from src.services.auth_service import AuthService
-from src.services.prediction_service import PredictionService
-from src.ml.model_loader import ModelLoader
-from src.utils.database import DatabaseManager
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
+# app.py instantiates the application at module scope (the WSGI entrypoint
+# gunicorn and Vercel expect), so importing it anywhere in the suite runs the
+# full startup path. Seed a safe development environment before that happens.
+# setdefault, so a real environment variable still wins.
+os.environ.setdefault("FLASK_ENV", "development")
+os.environ.setdefault("SECRET_KEY", "test-secret-key-not-used-in-production")
+os.environ.setdefault(
+    "DATABASE_PATH", os.path.join(tempfile.mkdtemp(prefix="loan-tests-"), "import.db")
+)
 
-@pytest.fixture(scope="session")
-def faker_instance():
-    """Faker instance for generating realistic test data"""
-    return Faker()
+MODEL_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "models")
+)
+MODEL_ARTEFACTS = [
+    "loan_eligibility_model.pkl",
+    "feature_scaler.pkl",
+    "feature_columns.pkl",
+]
 
-
-@pytest.fixture(scope="function")
-def test_db_path(tmp_path):
-    """Create temporary database for testing"""
-    db_path = tmp_path / "test_loan_prediction.db"
-    yield str(db_path)
-    # Cleanup after test
-    if db_path.exists():
-        db_path.unlink()
-
-
-@pytest.fixture(scope="function")
-def db_manager(test_db_path):
-    """Database manager with test database"""
-    manager = DatabaseManager(test_db_path)
-    manager.initialize_database()
-    yield manager
-    manager.close()
+# Tests needing a real prediction are skipped rather than failed when the
+# artefacts have not been built, so a fresh clone still gets a green run.
+models_available = all(
+    os.path.exists(os.path.join(MODEL_DIR, name)) for name in MODEL_ARTEFACTS
+)
+requires_model = pytest.mark.skipif(
+    not models_available,
+    reason="ML artefacts absent; run `python models/model_trainer.py`",
+)
 
 
-@pytest.fixture(scope="function")
-def user_repository(test_db_path, db_manager):
-    """User repository fixture"""
-    return UserRepository(test_db_path)
+@pytest.fixture
+def flask_app(tmp_path, monkeypatch):
+    """A fully configured app instance backed by a temporary database."""
+    monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.db"))
+    monkeypatch.setenv("SECRET_KEY", "test-secret-key-not-used-in-production")
+    monkeypatch.setenv("ADMIN_PASSWORD", "test-admin-password")
+    monkeypatch.setenv("FLASK_ENV", "development")
+
+    # Reimported per test so setup_app/setup_database observe the patched env.
+    sys.modules.pop("app", None)
+    import app as app_module
+
+    instance = app_module.LoanEligibilityApp()
+    instance.app.config["TESTING"] = True
+    return instance
 
 
-@pytest.fixture(scope="function")
-def admin_repository(test_db_path, db_manager):
-    """Admin repository fixture"""
-    return AdminRepository(test_db_path)
+@pytest.fixture
+def client(flask_app):
+    """Anonymous test client."""
+    return flask_app.app.test_client()
 
 
-@pytest.fixture(scope="function")
-def prediction_repository(test_db_path, db_manager):
-    """Prediction repository fixture"""
-    return PredictionRepository(test_db_path)
-
-
-@pytest.fixture(scope="function")
-def auth_service(user_repository, admin_repository):
-    """Authentication service fixture"""
-    return AuthService(user_repository, admin_repository)
-
-
-@pytest.fixture(scope="function")
-def model_loader_mock():
-    """Mock model loader for testing without actual models"""
-    class MockModelLoader:
-        def is_model_loaded(self):
-            return True
-
-        def predict(self, features):
-            import numpy as np
-            return np.array([1])  # Always approve
-
-        def predict_proba(self, features):
-            import numpy as np
-            return np.array([[0.2, 0.8]])  # 80% confidence
-
-        def scale_features(self, features):
-            return features
-
-    return MockModelLoader()
-
-
-@pytest.fixture(scope="function")
-def prediction_service(prediction_repository, model_loader_mock):
-    """Prediction service fixture with mocked model"""
-    return PredictionService(prediction_repository, model_loader_mock)
-
-
-@pytest.fixture(scope="function")
-def sample_user_data(faker_instance):
-    """Generate realistic user registration data"""
+@pytest.fixture
+def user_credentials():
     return {
-        "user_id": faker_instance.user_name(),
-        "email": faker_instance.email(),
-        "full_name": faker_instance.name(),
-        "password": "SecurePass123!",
-        "mobile_number": faker_instance.phone_number()[:15],
+        "user_id": "ada_lovelace",
+        "email": "ada@example.com",
+        "full_name": "Ada Lovelace",
+        "password": "CorrectHorse1",
+        "confirm_password": "CorrectHorse1",
     }
 
 
-@pytest.fixture(scope="function")
-def sample_loan_data(faker_instance):
-    """Generate realistic loan application data"""
+@pytest.fixture
+def auth_client(client, user_credentials):
+    """Test client with a registered, logged-in user session."""
+    assert client.post("/api/register", json=user_credentials).status_code == 200
+    response = client.post(
+        "/api/login",
+        json={
+            "user_id": user_credentials["user_id"],
+            "password": user_credentials["password"],
+        },
+    )
+    assert response.status_code == 200
+    return client
+
+
+@pytest.fixture
+def loan_application():
+    """A well-formed application that passes validation."""
     return {
-        "first_name": faker_instance.first_name(),
-        "last_name": faker_instance.last_name(),
+        "first_name": "Ada",
+        "last_name": "Lovelace",
         "gender": 1,
-        "marital_status": 1,
+        "married": 1,
         "dependents": 2,
         "education": 0,
-        "employment_type": 0,
-        "property_area": 1,
+        "self_employed": 0,
+        "property_area": 2,
         "credit_history": 1.0,
         "cibil_score": 750,
-        "applicant_income": 50000.0,
-        "coapplicant_income": 30000.0,
-        "loan_amount": 200000.0,
-        "loan_tenure": 360.0,
+        "applicant_income": 5000,
+        "coapplicant_income": 1500,
+        "loan_amount": 150,
+        "loan_amount_term": 360,
     }

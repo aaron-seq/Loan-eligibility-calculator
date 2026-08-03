@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+loan_env/
+
+# Secrets — never commit
+.env
+
+# Runtime data
+*.db
+
+# Trained model artifacts: rebuilt from data/train.csv via
+# `python models/model_trainer.py`. Kept out of git because sklearn
+# pickles are not portable across library versions.
+models/*.pkl
+
+# Test / coverage output
+.pytest_cache/
+.coverage
+htmlcov/

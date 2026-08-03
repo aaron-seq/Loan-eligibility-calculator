@@ -10,7 +10,7 @@ import os
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+from sklearn.metrics import accuracy_score, classification_report
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -47,14 +47,15 @@ class LoanEligibilityModelTrainer:
     
     def handle_missing_values(self, df: pd.DataFrame) -> pd.DataFrame:
         """Handle missing values in the dataset"""
-        # Fill missing values with appropriate strategies
-        df['Gender'].fillna(df['Gender'].mode()[0], inplace=True)
-        df['Married'].fillna(df['Married'].mode()[0], inplace=True)
-        df['Dependents'].fillna('0', inplace=True)
-        df['Self_Employed'].fillna(df['Self_Employed'].mode()[0], inplace=True)
-        df['Credit_History'].fillna(df['Credit_History'].mode()[0], inplace=True)
-        df['Loan_Amount_Term'].fillna(df['Loan_Amount_Term'].mode()[0], inplace=True)
-        df['LoanAmount'].fillna(df['LoanAmount'].median(), inplace=True)
+        # Fill missing values with appropriate strategies.
+        # Assigned back rather than inplace=True: chained assignment with
+        # inplace silently stops working under pandas 3.0 copy-on-write, which
+        # would leave NaNs in the training matrix instead of raising.
+        for column in ['Gender', 'Married', 'Self_Employed', 'Credit_History',
+                       'Loan_Amount_Term']:
+            df[column] = df[column].fillna(df[column].mode()[0])
+        df['Dependents'] = df['Dependents'].fillna('0')
+        df['LoanAmount'] = df['LoanAmount'].fillna(df['LoanAmount'].median())
         
         # Add CIBIL score (synthetic feature for enhanced model)
         np.random.seed(42)
@@ -67,13 +68,15 @@ class LoanEligibilityModelTrainer:
         # Calculate total income
         df['Total_Income'] = df['ApplicantIncome'] + df['CoapplicantIncome']
         
-        # Loan to income ratio
-        df['Loan_to_Income_Ratio'] = df['LoanAmount'] / df['Total_Income']
-        df['Loan_to_Income_Ratio'].replace([np.inf, -np.inf], 0, inplace=True)
-        
+        # Loan to income ratio (zero income yields inf; treat as 0)
+        df['Loan_to_Income_Ratio'] = (df['LoanAmount'] / df['Total_Income']).replace(
+            [np.inf, -np.inf], 0
+        )
+
         # EMI-like feature
-        df['EMI_feature'] = df['LoanAmount'] / df['Loan_Amount_Term']
-        df['EMI_feature'].replace([np.inf, -np.inf], 0, inplace=True)
+        df['EMI_feature'] = (df['LoanAmount'] / df['Loan_Amount_Term']).replace(
+            [np.inf, -np.inf], 0
+        )
         
         # Log transformations for skewed features
         df['ApplicantIncome_log'] = np.log(df['ApplicantIncome'] + 1)
