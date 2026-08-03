@@ -1,8 +1,17 @@
-Flask==3.0.0
-Werkzeug==3.0.1
-numpy==1.24.3
-pandas==2.0.3
-scikit-learn==1.3.0
-joblib==1.3.2
-gunicorn==21.2.0
-python-dotenv==1.0.0
+# Runtime dependencies.
+# Ranges rather than exact pins: the previous numpy==1.24.3 / pandas==2.0.3
+# pins had no wheels for Python 3.12+, so `pip install -r requirements.txt`
+# failed outright on a current interpreter.
+Flask>=3.0,<4.0
+Werkzeug>=3.0,<4.0
+python-dotenv>=1.0,<2.0
+
+# ML stack. scikit-learn is capped at the minor series because model artefacts
+# are pickled: a major upgrade can make previously trained .pkl files unloadable.
+# Re-run `python models/model_trainer.py` after changing this pin.
+numpy>=1.26,<3.0
+pandas>=2.1,<3.0
+scikit-learn>=1.5,<2.0
+
+# WSGI server for deployment (not used by `python app.py`).
+gunicorn>=21.2
