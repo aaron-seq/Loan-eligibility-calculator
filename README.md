@@ -242,36 +242,76 @@ python models/model_trainer.py   # prediction tests skip without artefacts
 pytest
 ```
 
-65 tests covering the feature-order contract, input validation, authentication,
-session boundaries and configuration. Coverage of `app.py` is 87%.
+71 tests covering the feature-order contract, input validation, authentication,
+session boundaries, multi-worker startup and configuration. Coverage of
+`app.py` is 87%.
 
 Tests that need the trained model skip themselves when the artefacts are
 absent, so a fresh clone still runs green.
 
+`test_concurrent_worker_startup` spawns real subprocesses, because the startup
+races it guards against are cross-process and do not reproduce in a
+single-process loop.
+
 ## Deployment
 
-The app runs anywhere with a writable filesystem:
+This app keeps state in SQLite, so it needs a host with a **writable,
+persistent filesystem**: Railway, Render, Fly.io, or any VM.
+
+### Docker (recommended)
+
+```bash
+docker build -t loan-app .
+
+docker run -d -p 8000:8000 \
+  -v loan-data:/data \
+  -e SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
+  -e ADMIN_PASSWORD="choose-something" \
+  loan-app
+```
+
+The build trains the model against the exact pinned library versions in the
+image, so the pickles always match the runtime. The named volume at `/data`
+holds the database — **without it, every redeploy starts empty.**
+
+`SECRET_KEY` is mandatory; the container refuses to start without it. The image
+runs as a non-root user and ships a `HEALTHCHECK` against `/api/health`.
+
+### Buildpack hosts
+
+A `Procfile` is included for Railway, Render and Heroku-style platforms. Its
+`release` step trains the model on each deploy. Attach a persistent disk and
+point `DATABASE_PATH` at it.
+
+### Bare process
 
 ```bash
 export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 export ADMIN_PASSWORD="choose-something"
 export FLASK_ENV=production
 python models/model_trainer.py
-gunicorn app:app
+gunicorn --workers 2 app:app
 ```
 
-### Serverless caveat
+### Why there is no `vercel.json`
 
-`vercel.json` is present, but **SQLite does not work on Vercel**. The Python
-runtime's filesystem is read-only outside `/tmp`, so registration and
-prediction history fail; `/tmp` is per-instance and ephemeral, so anything
-written there disappears. The `.pkl` artefacts are also git-ignored, and Vercel
-has no build step configured to produce them.
+It was removed because it could not work. Vercel's Python runtime has a
+read-only filesystem outside `/tmp`, so every registration and saved prediction
+fails; `/tmp` is per-instance and ephemeral, so anything written there vanishes.
+The config also had no build step to produce the model artefacts.
 
-To deploy as-is, use a host with a real filesystem — Railway, Fly.io, Render,
-or any VM. Serverless deployment needs a network-backed database first. This is
-tracked in
-[issue #8](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/8).
+Deploying this app to a serverless platform requires replacing SQLite with a
+network-backed database first. Shipping a config that silently loses user data
+is worse than shipping none.
+
+### Concurrency
+
+The app runs multi-worker safely. SQLite is opened in WAL mode with a 30s busy
+timeout, so readers do not block the writer, and startup is idempotent across
+workers — both are covered by `test_concurrent_worker_startup`.
+
+WAL still means **one writer at a time**. That is ample for this workload; a
+write-heavy deployment wants a client/server database.
 
 ## Project structure
 
@@ -280,7 +320,8 @@ Loan-eligibility-calculator/
 ├── app.py                     # The entire application: routes, validation, prediction
 ├── requirements.txt
 ├── pytest.ini
-├── vercel.json                # See the serverless caveat above
+├── Dockerfile                 # Trains the model at build; runs gunicorn as non-root
+├── Procfile                   # Buildpack hosts (Railway, Render, Heroku)
 ├── .env.example
 │
 ├── models/
@@ -324,6 +365,17 @@ so no admin account exists. Set it, delete the database file, and restart.
 
 **Model fails to load after upgrading scikit-learn** — pickled models are not
 portable across versions. Re-run `python models/model_trainer.py`.
+
+**`database is locked`, or workers dying on boot** — should not happen; the
+database opens in WAL mode with a 30s busy timeout and startup is idempotent.
+If it does, check that every connection goes through
+`get_database_connection()`, which is what applies those settings, and that
+`DATABASE_PATH` is not on a network filesystem — SQLite locking is unreliable
+over NFS/SMB.
+
+**Data disappears after redeploy** — the database is not on a persistent
+volume. With Docker, mount one at `/data`; on a buildpack host, attach a disk
+and point `DATABASE_PATH` at it.
 
 **Predictions look wrong after editing the trainer** — if you change the
 feature set, re-run the trainer so `feature_columns.pkl` is regenerated.
