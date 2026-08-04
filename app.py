@@ -122,6 +122,7 @@ class LoanEligibilityApp:
     def setup_database(self):
         """Initialize SQLite database for deployment compatibility"""
         with self.get_database_connection() as conn:
+            self.enable_wal(conn)
             cursor = conn.cursor()
 
             # Create users table
@@ -207,21 +208,61 @@ class LoanEligibilityApp:
                 admin_id,
             )
 
+        # OR IGNORE, not a plain INSERT: the SELECT above is a check-then-act
+        # race. Every gunicorn worker imports this module and runs startup
+        # concurrently, so under `--workers 2` both can observe zero admins and
+        # both insert, and the loser dies with a UNIQUE constraint violation
+        # before it can serve a request.
         cursor.execute(
-            "INSERT INTO admins (admin_id, password_hash) VALUES (?, ?)",
+            "INSERT OR IGNORE INTO admins (admin_id, password_hash) VALUES (?, ?)",
             (admin_id, generate_password_hash(password)),
         )
-        logger.info("Admin account '%s' created", admin_id)
+        if cursor.rowcount:
+            logger.info("Admin account '%s' created", admin_id)
 
     @contextmanager
     def get_database_connection(self):
-        """Context manager for database connections"""
-        conn = sqlite3.connect(self.app.config["DATABASE_PATH"])
+        """Context manager for database connections.
+
+        Three PRAGMAs matter here:
+
+        - WAL lets readers run concurrently with a writer. Under the default
+          rollback journal, one in-flight write blocks every read, which shows
+          up as "database is locked" as soon as more than one request overlaps.
+        - busy_timeout makes a blocked writer wait for the lock instead of
+          failing instantly.
+        - foreign_keys is off by default in SQLite, so the FK that
+          loan_predictions declares against users was never actually enforced.
+        """
+        conn = sqlite3.connect(self.app.config["DATABASE_PATH"], timeout=30.0)
         conn.row_factory = sqlite3.Row
         try:
+            # Both are per-connection and need no database lock, so they are
+            # safe to set on every connection. busy_timeout must come first:
+            # it governs how long everything after it waits for a lock.
+            conn.execute("PRAGMA busy_timeout=30000")
+            conn.execute("PRAGMA foreign_keys=ON")
             yield conn
         finally:
             conn.close()
+
+    def enable_wal(self, conn) -> None:
+        """Switch the database to WAL journalling, once.
+
+        WAL is a persistent property of the database file, so this only has to
+        succeed once and every later connection inherits it. It is deliberately
+        not in get_database_connection: the journal-mode switch needs an
+        exclusive lock, and SQLite does not reliably invoke the busy handler
+        for it, so running it per-connection makes concurrent workers fail with
+        "database is locked" on startup.
+        """
+        try:
+            mode = conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+            if str(mode).lower() != "wal":
+                logger.warning("Could not enable WAL; journal_mode is %r", mode)
+        except sqlite3.OperationalError as e:
+            # Another worker is mid-switch. Whoever wins sets it for everyone.
+            logger.debug("WAL not set on this worker: %s", e)
 
     def load_ml_models(self):
         """Load the model, scaler and the feature order they were trained on.
