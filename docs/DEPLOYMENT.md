@@ -173,9 +173,14 @@ artifacts you produced yourself or fetched over a channel you trust.
 ```json
 {
   "status": "ok",
-  "app_version": "2.0.0",
+  "app_version": "2.1.0",
   "model_status": "ready",
-  "model": { "version": "…", "calibrated": true, "metrics": { … } }
+  "model": {
+    "version": "…",
+    "calibrated": true,
+    "metrics": { … },
+    "runtime_versions": { "scikit_learn": "1.9.1", "numpy": "2.4.6" }
+  }
 }
 ```
 
