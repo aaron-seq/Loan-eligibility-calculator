@@ -17,6 +17,17 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+#: The only writable path on Vercel and AWS Lambda, and the reason serverless
+#: is a demo-only target for this application — see docs/DEPLOYMENT.md.
+#:
+#: The scanners flag a hardcoded /tmp (bandit B108 / ruff S108) because of
+#: symlink and predictable-name attacks on a shared multi-user /tmp. Neither
+#: applies here: a serverless invocation gets a private, single-tenant,
+#: ephemeral filesystem, and this is the only writable path the platform
+#: offers, so it is forced rather than chosen. Always overridable via
+#: DATABASE_PATH.
+SERVERLESS_WRITABLE_DIR = "/tmp"  # nosec B108  # noqa: S108
+
 
 class ConfigError(RuntimeError):
     """Raised when the environment cannot produce a safe configuration."""
@@ -128,7 +139,9 @@ def load_config(env: str | None = None) -> Config:
         os.environ.get("VERCEL") or os.environ.get("AWS_LAMBDA_FUNCTION_NAME")
     )
     default_database = (
-        "/tmp/loanwise.db" if on_serverless else str(BASE_DIR / "loanwise.db")
+        f"{SERVERLESS_WRITABLE_DIR}/loanwise.db"
+        if on_serverless
+        else str(BASE_DIR / "loanwise.db")
     )
     database_path = os.environ.get("DATABASE_PATH", default_database)
     model_dir = os.environ.get("MODEL_DIR", str(BASE_DIR / "models"))
@@ -157,7 +170,7 @@ def load_config(env: str | None = None) -> Config:
         raise ConfigError("ANNUAL_INTEREST_RATE is a fraction, e.g. 0.105 for 10.5%")
 
     if on_serverless:
-        if database_path.startswith("/tmp"):
+        if database_path.startswith(SERVERLESS_WRITABLE_DIR):
             warnings.append(
                 "Serverless deployment detected: the database lives in /tmp and is "
                 "destroyed on every cold start. Accounts and saved applications "

@@ -19,18 +19,18 @@ def config():
 
 
 def application(**overrides) -> LoanApplication:
-    defaults = dict(
-        applicant_income=50_000,
-        coapplicant_income=0,
-        loan_amount=1_000_000,
-        loan_term_months=240,
-        credit_history=1,
-        dependents=0,
-        education="graduate",
-        self_employed=False,
-        property_area="urban",
-        cibil_score=760,
-    )
+    defaults = {
+        "applicant_income": 50_000,
+        "coapplicant_income": 0,
+        "loan_amount": 1_000_000,
+        "loan_term_months": 240,
+        "credit_history": 1,
+        "dependents": 0,
+        "education": "graduate",
+        "self_employed": False,
+        "property_area": "urban",
+        "cibil_score": 760,
+    }
     return LoanApplication(**{**defaults, **overrides})
 
 
@@ -127,13 +127,9 @@ class TestRules:
 
 class TestVerdict:
     def test_worst_severity_wins(self, config):
-        app = application(
-            applicant_income=20_000, loan_amount=5_000_000, cibil_score=800
-        )
+        app = application(applicant_income=20_000, loan_amount=5_000_000, cibil_score=800)
         assert (
-            rules_verdict(
-                evaluate_rules(app, compute_affordability(app, config), config)
-            )
+            rules_verdict(evaluate_rules(app, compute_affordability(app, config), config))
             == "fail"
         )
 
@@ -142,8 +138,6 @@ class TestVerdict:
             applicant_income=300_000, loan_amount=1_000_000, cibil_score=800
         )
         assert (
-            rules_verdict(
-                evaluate_rules(app, compute_affordability(app, config), config)
-            )
+            rules_verdict(evaluate_rules(app, compute_affordability(app, config), config))
             == "pass"
         )

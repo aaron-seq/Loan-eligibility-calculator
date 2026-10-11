@@ -28,7 +28,8 @@ import argparse
 import hashlib
 import json
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from itertools import pairwise
 from typing import Any
 
 import numpy as np
@@ -111,8 +112,8 @@ def candidate_pipelines() -> dict[str, Pipeline]:
     ]
     return {
         "logistic_regression": Pipeline(
-            common
-            + [
+            [
+                *common,
                 (
                     "model",
                     LogisticRegression(
@@ -120,12 +121,12 @@ def candidate_pipelines() -> dict[str, Pipeline]:
                         class_weight="balanced",
                         random_state=RANDOM_STATE,
                     ),
-                )
+                ),
             ]
         ),
         "random_forest": Pipeline(
-            common
-            + [
+            [
+                *common,
                 (
                     "model",
                     RandomForestClassifier(
@@ -136,15 +137,13 @@ def candidate_pipelines() -> dict[str, Pipeline]:
                         random_state=RANDOM_STATE,
                         n_jobs=-1,
                     ),
-                )
+                ),
             ]
         ),
     }
 
 
-def cross_validate(
-    pipeline: Pipeline, X: pd.DataFrame, y: pd.Series
-) -> dict[str, float]:
+def cross_validate(pipeline: Pipeline, X: pd.DataFrame, y: pd.Series) -> dict[str, float]:
     """Repeated stratified CV. We report the spread, not just the mean."""
     cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=4, random_state=RANDOM_STATE)
     auc = cross_val_score(pipeline, X, y, cv=cv, scoring="roc_auc", n_jobs=-1)
@@ -177,7 +176,7 @@ def reliability_table(
     """
     edges = np.linspace(0, 1, bins + 1)
     rows = []
-    for lo, hi in zip(edges[:-1], edges[1:]):
+    for lo, hi in pairwise(edges):
         mask = (probs >= lo) & (probs < hi if hi < 1 else probs <= hi)
         if not mask.any():
             rows.append({"bin": f"{lo:.1f}-{hi:.1f}", "n": 0})
@@ -341,7 +340,7 @@ def monotonicity_check(pipeline: Pipeline, annual_rate: float) -> dict[str, Any]
                 probs = pipeline.predict_proba(
                     build_feature_frame(variants, annual_rate)
                 )[:, 1]
-                for previous, current in zip(probs[:-1], probs[1:]):
+                for previous, current in pairwise(probs):
                     comparisons += 1
                     drop = float(previous - current)
                     if drop > 1e-9:
@@ -398,7 +397,7 @@ def train(
     X, y, raw, applications = load_dataset(data_path, annual_rate)
     print(f"Loaded {len(X)} rows, {X.shape[1]} features, approval rate {y.mean():.1%}")
 
-    X_train, X_test, y_train, y_test, raw_train, raw_test = train_test_split(
+    X_train, X_test, y_train, y_test, _raw_train, raw_test = train_test_split(
         X, y, raw, test_size=0.2, random_state=RANDOM_STATE, stratify=y
     )
 
@@ -429,9 +428,7 @@ def train(
             f"{monotonicity[name]['worst_drop']:.3f})"
         )
 
-    eligible = [n for n in cv_results if monotonicity[n]["monotonic"]] or list(
-        cv_results
-    )
+    eligible = [n for n in cv_results if monotonicity[n]["monotonic"]] or list(cv_results)
     best_name = max(eligible, key=lambda n: cv_results[n]["roc_auc_mean"])
 
     # Among eligible models, prefer logistic regression unless another is
@@ -500,13 +497,13 @@ def train(
     )
 
     metrics = {
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "dataset": {
             "path": os.path.relpath(data_path, BASE_DIR),
             "sha256_prefix": fingerprint(data_path),
-            "rows": int(len(X)),
+            "rows": len(X),
             "approval_rate": round(float(y.mean()), 4),
-            "holdout_rows": int(len(X_test)),
+            "holdout_rows": len(X_test),
         },
         "selected_model": best_name,
         "calibrated": use_calibrated,
@@ -534,15 +531,15 @@ def train(
             "accuracy": (calibrated_metrics if use_calibrated else uncalibrated)[
                 "accuracy"
             ],
-            "holdout_rows": int(len(X_test)),
+            "holdout_rows": len(X_test),
         },
         metadata={
-            "version": f"{best_name}-{datetime.now(timezone.utc):%Y%m%d}-{fingerprint(data_path)}",
+            "version": f"{best_name}-{datetime.now(UTC):%Y%m%d}-{fingerprint(data_path)}",
             "algorithm": best_name,
             "calibrated": use_calibrated,
-            "trained_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "trained_at": datetime.now(UTC).isoformat(timespec="seconds"),
             "annual_interest_rate": annual_rate,
-            "training_rows": int(len(X)),
+            "training_rows": len(X),
             "monotonic_in_loan_amount": served_monotonicity["monotonic"],
         },
     )
@@ -620,7 +617,9 @@ def write_model_card(metrics: dict[str, Any], bundle: ModelBundle, path: str) ->
     with open(path, "w") as fh:
         fh.write(f"""# Model card
 
-*Generated by `python -m loanapp.ml.train` on {metrics["generated_at"]}. Do not edit by hand.*
+*Generated by `python -m loanapp.ml.train` on {
+            metrics["generated_at"]
+        }. Do not edit by hand.*
 
 ## What this model is
 
@@ -631,7 +630,11 @@ estimate, not a lending decision, and no lender is bound by it.
 | | |
 |---|---|
 | Algorithm | `{metrics["selected_model"]}` |
-| Probability calibration | {"sigmoid (Platt), applied" if metrics["calibrated"] else "none — calibration did not improve the Brier score"} |
+| Probability calibration | {
+            "sigmoid (Platt), applied"
+            if metrics["calibrated"]
+            else "none — calibration did not improve the Brier score"
+        } |
 | Bundle version | `{bundle.version}` |
 | Features | {len(metrics["feature_columns"])} (listed below) |
 
@@ -660,19 +663,28 @@ those patterns, including any that were unfair.
 |---|---|---|
 | ROC-AUC | {m["roc_auc"]:.3f} | Ranking quality. 0.5 = coin flip. |
 | PR-AUC | {m["pr_auc"]:.3f} | Precision/recall trade-off on the approved class. |
-| Brier score | {m["brier_score"]:.3f} | Probability accuracy. Lower is better; 0.25 = always guessing 50%. |
-| Accuracy @ {m["threshold"]:.2f} | {m["accuracy"]:.3f} | Compare against the {ds["approval_rate"]:.1%} always-approve baseline. |
+| Brier score | {
+            m[
+                "brier_score"
+            ]:.3f} | Probability accuracy. Lower is better; 0.25 = always guessing 50%. |
+| Accuracy @ {m["threshold"]:.2f} | {m["accuracy"]:.3f} | Compare against the {
+            ds["approval_rate"]:.1%} always-approve baseline. |
 | Precision | {m["precision"]:.3f} | Of applications called approvable, how many were. |
 | Recall | {m["recall"]:.3f} | Of approvable applications, how many were found. |
 
-Cross-validated ROC-AUC on the training split: **{cv["roc_auc_mean"]:.3f} ± {cv["roc_auc_std"]:.3f}**.
+Cross-validated ROC-AUC on the training split: **{cv["roc_auc_mean"]:.3f} ± {
+            cv["roc_auc_std"]:.3f}**.
 
 ### Confusion matrix at threshold {m["threshold"]:.2f}
 
 | | Predicted decline | Predicted approve |
 |---|---|---|
-| **Actually declined** | {m["confusion_matrix"]["true_negative"]} | {m["confusion_matrix"]["false_positive"]} |
-| **Actually approved** | {m["confusion_matrix"]["false_negative"]} | {m["confusion_matrix"]["true_positive"]} |
+| **Actually declined** | {m["confusion_matrix"]["true_negative"]} | {
+            m["confusion_matrix"]["false_positive"]
+        } |
+| **Actually approved** | {m["confusion_matrix"]["false_negative"]} | {
+            m["confusion_matrix"]["true_positive"]
+        } |
 
 ### Calibration
 
@@ -698,12 +710,18 @@ probability — below that it is invisible in anything we display.
 
 | Candidate | Monotonic | Material reversals | Worst drop |
 |---|---|---|---|
-{chr(10).join(
-    f"| `{name}` | {'yes' if result['monotonic'] else '**no**'} | "
-    f"{result['material_violations']}/{result['comparisons']} | {result['worst_drop']:.3f} |"
-    for name, result in metrics["monotonicity"].items()
-)}
-| **served model** | {"yes" if metrics["served_model_monotonicity"]["monotonic"] else "**no**"} | {metrics["served_model_monotonicity"]["material_violations"]}/{metrics["served_model_monotonicity"]["comparisons"]} | {metrics["served_model_monotonicity"]["worst_drop"]:.3f} |
+{
+            chr(10).join(
+                f"| `{name}` | {'yes' if result['monotonic'] else '**no**'} | "
+                f"{result['material_violations']}/{result['comparisons']} | {result['worst_drop']:.3f} |"
+                for name, result in metrics["monotonicity"].items()
+            )
+        }
+| **served model** | {
+            "yes" if metrics["served_model_monotonicity"]["monotonic"] else "**no**"
+        } | {metrics["served_model_monotonicity"]["material_violations"]}/{
+            metrics["served_model_monotonicity"]["comparisons"]
+        } | {metrics["served_model_monotonicity"]["worst_drop"]:.3f} |
 
 Non-monotonic candidates are disqualified from selection regardless of AUC.
 This check was added after a random forest — with a perfectly respectable

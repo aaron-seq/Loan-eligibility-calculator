@@ -99,7 +99,7 @@ class RegistrationRequest(BaseModel):
         return value
 
     @model_validator(mode="after")
-    def check_match(self) -> "RegistrationRequest":
+    def check_match(self) -> RegistrationRequest:
         if self.password != self.confirm_password:
             raise ValueError("Passwords do not match")
         return self

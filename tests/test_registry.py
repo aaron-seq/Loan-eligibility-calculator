@@ -7,7 +7,10 @@ orders, with nothing comparing them.
 
 from __future__ import annotations
 
+import re
+
 import pytest
+import sklearn
 
 from loanapp.features import FEATURE_COLUMNS
 from loanapp.ml.registry import (
@@ -15,6 +18,7 @@ from loanapp.ml.registry import (
     ModelBundle,
     ModelContractError,
     ModelUnavailable,
+    _runtime_versions,
     load_bundle,
     save_bundle,
 )
@@ -26,18 +30,18 @@ class DummyPipeline:
 
 
 def bundle(**overrides) -> ModelBundle:
-    defaults = dict(
-        pipeline=DummyPipeline(),
-        feature_columns=FEATURE_COLUMNS,
-        baselines={"loan_amount": 100.0},
-        metrics={"roc_auc": 0.8},
-        metadata={"version": "test-1"},
-    )
+    defaults = {
+        "pipeline": DummyPipeline(),
+        "feature_columns": FEATURE_COLUMNS,
+        "baselines": {"loan_amount": 100.0},
+        "metrics": {"roc_auc": 0.8},
+        "metadata": {"version": "test-1"},
+    }
     return ModelBundle(**{**defaults, **overrides})
 
 
 def test_missing_bundle_says_how_to_create_one(tmp_path):
-    with pytest.raises(ModelUnavailable, match="loanapp.ml.train"):
+    with pytest.raises(ModelUnavailable, match=re.escape("loanapp.ml.train")):
         load_bundle(str(tmp_path))
 
 
@@ -68,7 +72,7 @@ def test_missing_column_is_rejected(tmp_path):
 
 
 def test_extra_column_is_rejected(tmp_path):
-    save_bundle(bundle(feature_columns=FEATURE_COLUMNS + ("surprise",)), str(tmp_path))
+    save_bundle(bundle(feature_columns=(*FEATURE_COLUMNS, "surprise")), str(tmp_path))
     with pytest.raises(ModelContractError):
         load_bundle(str(tmp_path))
 
@@ -77,6 +81,60 @@ def test_stale_bundle_format_is_rejected(tmp_path):
     save_bundle(bundle(format_version=BUNDLE_FORMAT_VERSION - 1), str(tmp_path))
     with pytest.raises(ModelContractError, match="format"):
         load_bundle(str(tmp_path))
+
+
+class TestLibraryContract:
+    """The second guard: library versions, not just feature columns.
+
+    scikit-learn pickles are not portable across minor versions. A bundle
+    trained under 1.5 loads happily into 1.9 and then raises
+    ``AttributeError: 'SimpleImputer' object has no attribute '_fill_dtype'``
+    inside ``predict`` — a 500 on every request with nothing naming the cause.
+    This was a real failure, hit while upgrading the dependency set.
+    """
+
+    def test_a_minor_version_drift_is_rejected(self, tmp_path):
+        stale = bundle()
+        stale.runtime_versions = {"scikit_learn": "1.5.0", "numpy": "1.26.4"}
+        save_bundle(stale, str(tmp_path))
+        with pytest.raises(ModelContractError, match="library contract"):
+            load_bundle(str(tmp_path))
+
+    def test_the_message_names_both_versions_and_the_remedy(self, tmp_path):
+        stale = bundle()
+        stale.runtime_versions = {**_runtime_versions(), "scikit_learn": "1.5.0"}
+        save_bundle(stale, str(tmp_path))
+        with pytest.raises(ModelContractError) as caught:
+            load_bundle(str(tmp_path))
+        message = str(caught.value)
+        assert "1.5.0" in message
+        assert sklearn.__version__ in message
+        assert "loanapp.ml.train" in message
+
+    def test_a_patch_version_drift_is_tolerated(self, tmp_path):
+        """Refusing across a patch release would turn a security patch into an
+        outage. Patch releases do not change pickle layout."""
+        major_minor = ".".join(sklearn.__version__.split(".")[:2])
+        tolerated = bundle()
+        tolerated.runtime_versions = {
+            **_runtime_versions(),
+            "scikit_learn": f"{major_minor}.99",
+        }
+        save_bundle(tolerated, str(tmp_path))
+        assert load_bundle(str(tmp_path)).version == "test-1"
+
+    def test_versions_are_recorded_without_the_trainer_asking(self):
+        """Defaulted at construction, so a new trainer cannot forget."""
+        assert bundle().runtime_versions["scikit_learn"] == sklearn.__version__
+
+    def test_a_bundle_predates_version_recording(self, tmp_path):
+        """A v3 bundle with no recorded versions is treated as drifted rather
+        than assumed compatible."""
+        unrecorded = bundle()
+        unrecorded.runtime_versions = {}
+        save_bundle(unrecorded, str(tmp_path))
+        with pytest.raises(ModelContractError, match="unknown"):
+            load_bundle(str(tmp_path))
 
 
 def test_a_bare_pickled_estimator_is_rejected(tmp_path):

@@ -25,9 +25,7 @@ class TestHealth:
         assert body["model_status"] == "ready"
         assert "version" in body["model"]
 
-    def test_reports_degraded_without_a_model_but_still_returns_200(
-        self, modelless_app
-    ):
+    def test_reports_degraded_without_a_model_but_still_returns_200(self, modelless_app):
         """A missing model is not a reason for an orchestrator to restart the
         process — restarting will not produce one."""
         response = modelless_app.test_client().get("/api/health")
@@ -127,9 +125,7 @@ class TestCompare:
         assert data["best_index"] == 1  # the smaller loan
 
     def test_requires_at_least_two_scenarios(self, client):
-        assert (
-            client.post("/api/compare", json={"scenarios": [VALID]}).status_code == 400
-        )
+        assert client.post("/api/compare", json={"scenarios": [VALID]}).status_code == 400
 
     def test_caps_the_number_of_scenarios(self, client):
         response = client.post("/api/compare", json={"scenarios": [VALID] * 6})

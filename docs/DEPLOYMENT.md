@@ -21,6 +21,7 @@ not a configuration problem, and the reasoning is below.
 | `MODEL_DIR` | no | Defaults to `./models` |
 | `TRUSTED_PROXY` | only behind a proxy | Makes rate limiting trust `X-Forwarded-For` |
 | `SESSION_COOKIE_SECURE` | no | Defaults to true in production |
+| — | — | Requires Python >= 3.11 (set by numpy/pandas/scikit-learn) |
 | `ANNUAL_INTEREST_RATE` | no | Fraction, e.g. `0.105`. Affordability reference rate. |
 | `APPROVE_THRESHOLD` / `BORDERLINE_THRESHOLD` | no | Decision bands, `0 < borderline < approve < 1` |
 
@@ -191,9 +192,36 @@ model availability.
 | `unavailable` | No bundle found | Run the trainer, redeploy |
 | `contract_mismatch` | Bundle disagrees with the code | **Deployment error.** Retrain and redeploy. |
 
-`contract_mismatch` means someone shipped code whose feature set differs from
-the deployed model. The app refuses to serve rather than scoring a mis-aligned
-vector — which is the exact failure this design exists to prevent.
+`contract_mismatch` covers two cases, and the error in the startup log says
+which:
+
+- **Feature mismatch** — code whose `FEATURE_COLUMNS` differ from the deployed
+  bundle's.
+- **Library mismatch** — the bundle was pickled under a different minor version
+  of scikit-learn or numpy. `GET /api/health` publishes the bundle's
+  `runtime_versions` so you can compare without shell access.
+
+Either way the app refuses to serve rather than scoring a mis-aligned vector or
+calling into an incompatible pickle. Both are fixed the same way: retrain
+(`make train`), commit the bundle, redeploy.
+
+### Upgrading dependencies
+
+```bash
+pip-audit -r requirements.txt     # what needs to move, and why
+# edit the pin, then:
+make train                        # regenerate the bundle under the new libraries
+make check                        # lint + tests + audit
+```
+
+The bundle must be regenerated whenever scikit-learn or numpy changes minor
+version. CI enforces this: the `train` job fails if the committed bundle cannot
+be loaded and scored by the pinned library set.
+
+Pins are exact rather than ranges because the bundle is a pickle. The cost is
+manual upgrades; the mitigation is the weekly `pip-audit` run in CI, so a new
+advisory surfaces as a failing scheduled build rather than waiting for someone
+to look.
 
 ### What to monitor
 

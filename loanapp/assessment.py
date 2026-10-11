@@ -18,7 +18,7 @@ system does not have.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
@@ -161,7 +161,7 @@ class Assessor:
             model_version=self.bundle.version,
             model_calibrated=self.bundle.is_calibrated,
             model_metrics=self.bundle.metrics,
-            assessed_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            assessed_at=datetime.now(UTC).isoformat(timespec="seconds"),
         )
 
     def compare(self, applications: list[LoanApplication]) -> list[dict[str, Any]]:

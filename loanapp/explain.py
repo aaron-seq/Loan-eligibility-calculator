@@ -30,8 +30,9 @@ not SHAP and is not presented as such.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from .config import Config
 from .features import EXPLAINABLE_INPUTS, INPUT_LABELS, LoanApplication
@@ -193,8 +194,10 @@ def suggest_improvements(
         candidates.append(
             (
                 f"Extend the term to {longer} months",
-                "A longer term lowers the monthly instalment. It also increases "
-                "the total interest you pay.",
+                (
+                    "A longer term lowers the monthly instalment. It also increases "
+                    "the total interest you pay."
+                ),
                 app.replace(loan_term_months=longer),
             )
         )
@@ -204,8 +207,10 @@ def suggest_improvements(
         candidates.append(
             (
                 "Add a co-applicant",
-                f"A co-applicant earning {added:,.0f} per month raises household "
-                "income and spreads the obligation.",
+                (
+                    f"A co-applicant earning {added:,.0f} per month raises household "
+                    "income and spreads the obligation."
+                ),
                 app.replace(coapplicant_income=added),
             )
         )
@@ -214,9 +219,11 @@ def suggest_improvements(
         candidates.append(
             (
                 "Clear the adverse credit record",
-                "Settling outstanding defaults and rebuilding a clean repayment "
-                "record has the largest single effect in this model. It "
-                "typically takes 6-12 months.",
+                (
+                    "Settling outstanding defaults and rebuilding a clean repayment "
+                    "record has the largest single effect in this model. It "
+                    "typically takes 6-12 months."
+                ),
                 app.replace(credit_history=1),
             )
         )

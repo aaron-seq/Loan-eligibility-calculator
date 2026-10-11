@@ -25,7 +25,7 @@ from .db import ApplicationRepository, UserRepository, initialise
 from .ml.registry import ModelContractError, ModelUnavailable, load_bundle
 from .security import install_csrf
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 
 def configure_logging(config: Config) -> None:
@@ -63,9 +63,7 @@ def create_app(config: Config | None = None) -> Flask:
 
     initialise(config.database_path)
     app.extensions["user_repository"] = UserRepository(config.database_path)
-    app.extensions["application_repository"] = ApplicationRepository(
-        config.database_path
-    )
+    app.extensions["application_repository"] = ApplicationRepository(config.database_path)
 
     _load_model(app, config)
     install_csrf(app)

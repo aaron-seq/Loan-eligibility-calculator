@@ -2,28 +2,43 @@
 
 A bundle is a single ``.joblib`` file holding the fitted sklearn pipeline plus
 the metadata needed to prove it is safe to use: the feature order it was
-trained on, the training data fingerprint, the metrics it achieved, and the
-baseline feature values the explainer needs.
+trained on, the library versions it was pickled under, the training data
+fingerprint, the metrics it achieved, and the baseline input values the
+explainer needs.
 
-:func:`load_bundle` refuses a model whose ``feature_columns`` disagree with
-``loanapp.features.FEATURE_COLUMNS``. That check is the direct fix for the bug
-that made the previous version unusable: training and serving each built their
-own column list, in different orders, with nothing comparing them.
+:func:`load_bundle` refuses a bundle that fails either of two contracts.
+
+**The feature contract.** ``feature_columns`` must match
+``loanapp.features.FEATURE_COLUMNS``. This is the direct fix for the bug that
+made the original version unusable: training and serving each built their own
+column list, in different orders, with nothing comparing them.
+
+**The library contract.** scikit-learn pickles are explicitly not portable
+across versions. Loading a bundle trained under 1.5 into 1.9 succeeds and then
+fails at predict time with ``AttributeError: 'SimpleImputer' object has no
+attribute '_fill_dtype'`` — a 500 per request with nothing pointing at the
+cause. We record the versions at save time and check them at load, so the same
+situation degrades to an actionable 503 instead.
 """
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import joblib
+import numpy
+import sklearn
 
 from ..features import FEATURE_COLUMNS
 
 BUNDLE_FILENAME = "loan_model.joblib"
-BUNDLE_FORMAT_VERSION = 2
+
+#: Bump when the bundle's own shape changes. Separate from the library check
+#: below: this catches *our* format drift, that catches the ecosystem's.
+BUNDLE_FORMAT_VERSION = 3
 
 
 class ModelUnavailable(RuntimeError):
@@ -31,7 +46,27 @@ class ModelUnavailable(RuntimeError):
 
 
 class ModelContractError(RuntimeError):
-    """A bundle exists but does not match the current feature contract."""
+    """A bundle exists but cannot be trusted to serve predictions."""
+
+
+def _runtime_versions() -> dict[str, str]:
+    """Library versions that affect whether a pickled pipeline still works.
+
+    Only scikit-learn and numpy: they own the pickled objects. pandas is used
+    to build the input frame, not stored inside the bundle, so a pandas upgrade
+    does not invalidate an artifact.
+    """
+    return {"scikit_learn": sklearn.__version__, "numpy": numpy.__version__}
+
+
+def _minor(version: str) -> str:
+    """``"1.9.1"`` -> ``"1.9"``.
+
+    Patch releases do not change pickle layout, and refusing to load across one
+    would turn a security patch into an outage. Minor and major releases do.
+    """
+    parts = version.split(".")
+    return ".".join(parts[:2]) if len(parts) >= 2 else version
 
 
 @dataclass
@@ -46,6 +81,9 @@ class ModelBundle:
     baselines: dict[str, Any]
     metrics: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    #: Library versions present when the pipeline was pickled. Defaulted at
+    #: construction so the trainer cannot forget to record them.
+    runtime_versions: dict[str, str] = field(default_factory=_runtime_versions)
     format_version: int = BUNDLE_FORMAT_VERSION
 
     @property
@@ -68,7 +106,7 @@ def bundle_path(model_dir: str) -> str:
 def save_bundle(bundle: ModelBundle, model_dir: str) -> str:
     os.makedirs(model_dir, exist_ok=True)
     bundle.metadata.setdefault(
-        "saved_at", datetime.now(timezone.utc).isoformat(timespec="seconds")
+        "saved_at", datetime.now(UTC).isoformat(timespec="seconds")
     )
     path = bundle_path(model_dir)
     joblib.dump(bundle, path)
@@ -111,4 +149,24 @@ def load_bundle(model_dir: str) -> ModelBundle:
             f"  code provides:  {list(FEATURE_COLUMNS)}\n"
             "Retrain with: python -m loanapp.ml.train"
         )
+
+    current = _runtime_versions()
+    drifted = {
+        library: (bundle.runtime_versions.get(library, "unknown"), running)
+        for library, running in current.items()
+        if _minor(bundle.runtime_versions.get(library, "")) != _minor(running)
+    }
+    if drifted:
+        detail = "\n".join(
+            f"  {library}: bundle pickled under {was}, running {now}"
+            for library, (was, now) in sorted(drifted.items())
+        )
+        raise ModelContractError(
+            "Model/library contract mismatch — refusing to serve predictions.\n"
+            f"{detail}\n"
+            "scikit-learn pickles are not portable across minor versions. Loading "
+            "anyway appears to work and then fails inside predict().\n"
+            "Retrain with: python -m loanapp.ml.train"
+        )
+
     return bundle

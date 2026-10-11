@@ -20,11 +20,11 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from loanapp import create_app  # noqa: E402
-from loanapp.config import Config  # noqa: E402
-from loanapp.features import LoanApplication  # noqa: E402
-from loanapp.ml.registry import bundle_path  # noqa: E402
-from loanapp.security import limiter  # noqa: E402
+from loanapp import create_app
+from loanapp.config import Config
+from loanapp.features import LoanApplication
+from loanapp.ml.registry import bundle_path
+from loanapp.security import limiter
 
 MODEL_DIR = str(Path(__file__).resolve().parent.parent / "models")
 

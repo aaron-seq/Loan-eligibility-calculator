@@ -30,8 +30,9 @@ happens once, here, in :func:`from_training_row`.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, asdict
-from typing import Any, Mapping
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
+from typing import Any
 
 import pandas as pd
 
@@ -134,7 +135,7 @@ class LoanApplication:
     def total_income(self) -> float:
         return self.applicant_income + self.coapplicant_income
 
-    def replace(self, **changes: Any) -> "LoanApplication":
+    def replace(self, **changes: Any) -> LoanApplication:
         """Return a copy with ``changes`` applied.
 
         Used by the what-if engine, which needs to score many nearby variants
@@ -174,9 +175,7 @@ def engineer(app: LoanApplication, annual_rate: float) -> dict[str, float]:
     # not a reason to raise ZeroDivisionError inside the model.
     loan_to_income = app.loan_amount / total_income if total_income > 0 else 0.0
     emi_to_income = emi / total_income if total_income > 0 else 0.0
-    coapplicant_share = (
-        app.coapplicant_income / total_income if total_income > 0 else 0.0
-    )
+    coapplicant_share = app.coapplicant_income / total_income if total_income > 0 else 0.0
 
     return {
         "credit_history": float(app.credit_history),

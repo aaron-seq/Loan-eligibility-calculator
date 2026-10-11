@@ -16,18 +16,18 @@ pytestmark = pytest.mark.requires_model
 
 
 def app(**overrides) -> LoanApplication:
-    defaults = dict(
-        applicant_income=50_000,
-        coapplicant_income=0,
-        loan_amount=2_000_000,
-        loan_term_months=240,
-        credit_history=1,
-        dependents=0,
-        education="graduate",
-        self_employed=False,
-        property_area="urban",
-        cibil_score=740,
-    )
+    defaults = {
+        "applicant_income": 50_000,
+        "coapplicant_income": 0,
+        "loan_amount": 2_000_000,
+        "loan_term_months": 240,
+        "credit_history": 1,
+        "dependents": 0,
+        "education": "graduate",
+        "self_employed": False,
+        "property_area": "urban",
+        "cibil_score": 740,
+    }
     return LoanApplication(**{**defaults, **overrides})
 
 
@@ -169,9 +169,7 @@ class TestGuidance:
     def test_only_one_borrow_less_option_is_offered(self, assessor):
         weak = app(applicant_income=25_000, loan_amount=4_000_000)
         borrow = [
-            s
-            for s in assessor.assess(weak).suggestions
-            if s.action.startswith("Borrow")
+            s for s in assessor.assess(weak).suggestions if s.action.startswith("Borrow")
         ]
         assert len(borrow) <= 1
 
@@ -200,9 +198,7 @@ class TestGuidance:
         assert "Clear the adverse credit record" not in actions
 
     def test_no_term_extension_beyond_the_maximum(self, assessor):
-        maxed = app(
-            loan_term_months=360, applicant_income=25_000, loan_amount=4_000_000
-        )
+        maxed = app(loan_term_months=360, applicant_income=25_000, loan_amount=4_000_000)
         actions = [s.action for s in assessor.assess(maxed).suggestions]
         assert not any(a.startswith("Extend the term") for a in actions)
 

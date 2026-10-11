@@ -1,12 +1,20 @@
-# Runtime dependencies. Pinned exactly so a deployment reproduces the
-# environment the model bundle was trained and tested against — an unpinned
-# scikit-learn upgrade can change unpickling behaviour for a saved estimator.
-Flask==3.0.3
-Werkzeug==3.0.3
-pydantic==2.7.4
-numpy==1.26.4
-pandas==2.2.2
-scikit-learn==1.5.0
-joblib==1.4.2
-gunicorn==22.0.0
-python-dotenv==1.0.1
+# Runtime dependencies, pinned exactly.
+#
+# Two reasons the pins are exact rather than ranges:
+#   1. The model bundle is a pickle. scikit-learn and numpy versions are part
+#      of the artifact's contract and are recorded inside it — see
+#      loanapp/ml/registry.py. A drifting minor version makes the bundle
+#      unloadable.
+#   2. Reproducible deployments.
+#
+# Upgrading: run `pip-audit -r requirements.txt`, bump, then `make train` to
+# regenerate the bundle under the new libraries. CI enforces both.
+Flask==3.1.3
+Werkzeug==3.1.9
+pydantic==2.14.0
+numpy==2.4.6
+pandas==3.0.6
+scikit-learn==1.9.1
+joblib==1.6.0
+gunicorn==26.2.0
+python-dotenv==1.2.2

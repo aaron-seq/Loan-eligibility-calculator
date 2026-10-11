@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from loanapp.features import FEATURE_COLUMNS, EXPLAINABLE_INPUTS
+from loanapp.features import EXPLAINABLE_INPUTS, FEATURE_COLUMNS
 from loanapp.ml.train import (
     _ablation_verdict,
     candidate_pipelines,

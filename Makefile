@@ -1,4 +1,4 @@
-.PHONY: help install train run test lint fmt check docker clean
+.PHONY: help install train run test lint fmt audit check docker clean
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -23,7 +23,11 @@ fmt: ## Auto-format
 	python -m ruff format loanapp tests app.py
 	python -m ruff check --fix loanapp tests app.py
 
-check: lint test ## Everything CI runs
+audit: ## Dependency vulnerability scan + static security scan
+	python -m pip_audit -r requirements.txt -r requirements-dev.txt --strict
+	python -m bandit -r loanapp app.py -ll
+
+check: lint test audit ## Everything CI runs
 
 docker: ## Build the production image
 	docker build -t loanwise:latest .

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-29T06:22:34+00:00",
+  "generated_at": "2026-10-11T17:42:54+00:00",
   "dataset": {
     "path": "data/train.csv",
     "sha256_prefix": "3ac62ced374efaf4",
@@ -21,14 +21,14 @@
       "accuracy_std": 0.03458197002358459
     },
     "random_forest": {
-      "roc_auc_mean": 0.7393370552361532,
-      "roc_auc_std": 0.05379882095559588,
+      "roc_auc_mean": 0.7399926364383018,
+      "roc_auc_std": 0.05643363029311257,
       "roc_auc_ci95": [
-        0.6286591237361581,
-        0.8266230104222719
+        0.6226167549350025,
+        0.8292776511182229
       ],
-      "accuracy_mean": 0.7428519892805607,
-      "accuracy_std": 0.03543399697326122
+      "accuracy_mean": 0.7255359719645433,
+      "accuracy_std": 0.037958955450559786
     }
   },
   "monotonicity": {
@@ -42,9 +42,9 @@
     },
     "random_forest": {
       "comparisons": 216,
-      "violations": 36,
-      "material_violations": 30,
-      "worst_drop": 0.0999,
+      "violations": 45,
+      "material_violations": 33,
+      "worst_drop": 0.11,
       "tolerance": 0.005,
       "monotonic": false
     }

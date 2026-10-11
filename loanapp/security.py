@@ -12,8 +12,8 @@ import hmac
 import secrets
 import time
 from collections import defaultdict, deque
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable
 
 from flask import current_app, g, jsonify, redirect, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash

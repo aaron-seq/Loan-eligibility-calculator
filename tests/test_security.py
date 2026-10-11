@@ -249,9 +249,7 @@ class TestAccessControl:
         response = registered_client.get(f"/api/applications/{foreign_id}")
         assert response.status_code == 404  # not 403 — existence is not revealed
 
-    def test_a_user_cannot_delete_another_users_application(
-        self, app, registered_client
-    ):
+    def test_a_user_cannot_delete_another_users_application(self, app, registered_client):
         repository = app.extensions["application_repository"]
         app.extensions["user_repository"].create(
             "victim", "victim@example.com", "Victim", hash_password("x" * 20)

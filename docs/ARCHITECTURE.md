@@ -25,6 +25,23 @@ The contract is additionally **persisted inside the model bundle** and
 the app start in a degraded state and return an explanatory 503 — it never
 scores a mis-aligned vector.
 
+### The second contract: library versions
+
+The bundle also records the scikit-learn and numpy versions it was pickled
+under, and `load_bundle` checks them the same way.
+
+This was added after hitting the failure during a dependency upgrade. A bundle
+trained under scikit-learn 1.5 loads into 1.9 without complaint and then raises
+`AttributeError: 'SimpleImputer' object has no attribute '_fill_dtype'` inside
+`predict` — a 500 on every request, with the only clue a warning on stderr at
+startup. scikit-learn documents that pickles are not portable across versions;
+the guard turns that from a runtime surprise into a startup refusal with a
+message naming both versions and the remedy.
+
+The check compares *minor* versions. Refusing to load across a patch release
+would turn a security patch into an outage, and patch releases do not change
+pickle layout.
+
 ## Layers
 
 ```
@@ -172,6 +189,7 @@ endpoint is protected by default rather than by remembering.
 | Tailwind from CDN | Needs network; unstyled offline | Zero build toolchain. A built stylesheet is a roadmap item. |
 | One-at-a-time attribution | Misses interactions | Exact, cheap, no extra dependency. Stated plainly rather than sold as SHAP. |
 | Model loaded per worker | Memory × workers | ~15 MB for a calibrated linear model. Would matter for a large ensemble. |
+| Exact dependency pins | Manual upgrades | The bundle is a pickle, so scikit-learn and numpy are part of the artifact contract. `pip-audit` runs weekly in CI so the pins cannot rot unnoticed. |
 
 ## Adding a feature to the model
 
@@ -184,3 +202,6 @@ endpoint is protected by default rather than by remembering.
    automatically; the model card regenerates.
 5. `make test`. `test_registry.py` fails if you commit a contract change without
    the retrained bundle.
+
+The same step 4-5 applies to a scikit-learn or numpy upgrade, for the same
+reason: the bundle is a pickle whose library versions are part of its contract.

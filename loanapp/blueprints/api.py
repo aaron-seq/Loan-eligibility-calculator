@@ -61,6 +61,10 @@ def health():
             "calibrated": assessor.bundle.is_calibrated,
             "trained_at": assessor.bundle.trained_at,
             "metrics": assessor.bundle.metrics,
+            # The library versions the bundle was pickled under. Published so
+            # an operator can diagnose a contract_mismatch without shell access
+            # to the container.
+            "runtime_versions": assessor.bundle.runtime_versions,
         }
     elif current_app.extensions.get("model_error"):
         body["model_error"] = current_app.extensions["model_error"]
@@ -125,9 +129,7 @@ def assess():
 
     user = current_user()
     if user is not None:
-        result["application_id"] = current_app.extensions[
-            "application_repository"
-        ].save(
+        result["application_id"] = current_app.extensions["application_repository"].save(
             user_id=user["user_id"],
             label=data.label,
             payload=application.to_dict(),
