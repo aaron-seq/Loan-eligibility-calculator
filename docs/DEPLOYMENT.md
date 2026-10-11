@@ -228,6 +228,14 @@ manual upgrades; the mitigation is the weekly `pip-audit` run in CI, so a new
 advisory surfaces as a failing scheduled build rather than waiting for someone
 to look.
 
+`.github/dependabot.yml` automates the part that is safe to automate. It
+proposes grouped PRs for the web and dev dependencies, and patch releases for
+everything — but it deliberately does **not** propose minor or major upgrades
+of scikit-learn or numpy. Those invalidate the bundle, so a bot PR could only
+ever be red until a human runs `make train`. Patch releases are proposed,
+because those are the security fixes and the load-time guard tolerates patch
+drift for exactly that reason.
+
 ### What to monitor
 
 - `/api/health` → `status` and `model_status`

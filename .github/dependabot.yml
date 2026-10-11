@@ -1,0 +1,53 @@
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels: ["dependencies"]
+    commit-message:
+      prefix: "deps"
+
+    groups:
+      # One PR for the web stack rather than four. These never require a model
+      # retrain, so they can be reviewed and merged as a unit.
+      web:
+        patterns: ["Flask", "Werkzeug", "gunicorn", "python-dotenv", "pydantic"]
+      dev:
+        patterns: ["pytest*", "ruff", "pip-audit", "bandit"]
+        dependency-type: development
+
+    ignore:
+      # scikit-learn and numpy are part of the model bundle's contract: the
+      # bundle is a pickle, and `load_bundle` refuses a minor-version drift
+      # (see loanapp/ml/registry.py). A bot-raised minor bump would open a PR
+      # that cannot pass CI until someone runs `make train` and commits the
+      # regenerated bundle, so automating it produces guaranteed-red noise.
+      #
+      # Patch releases are still proposed — those are the security fixes, and
+      # the guard tolerates patch drift precisely so they can land quickly.
+      #
+      # Minor and major upgrades for these two are deliberately manual:
+      #   pip-audit -r requirements.txt   # confirm the need
+      #   make train                      # regenerate the bundle
+      #   make check                      # lint + tests + audit
+      - dependency-name: scikit-learn
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: numpy
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # pandas only builds the input frame and is not stored in the bundle, but
+      # a major release (2.x -> 3.x moved to Arrow-backed strings by default)
+      # warrants a human reading the migration guide.
+      - dependency-name: pandas
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "ci"
