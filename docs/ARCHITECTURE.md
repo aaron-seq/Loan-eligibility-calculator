@@ -188,6 +188,7 @@ endpoint is protected by default rather than by remembering.
 | Hand-rolled CSRF | Code to maintain | ~40 lines, directly tested, avoids a WTForms dependency tree. |
 | Tailwind from CDN | Needs network; unstyled offline | Zero build toolchain. A built stylesheet is a roadmap item. |
 | One-at-a-time attribution | Misses interactions | Exact, cheap, no extra dependency. Stated plainly rather than sold as SHAP. |
+| Calibrated probability has a ~0.20 floor | No number for extreme inputs | Platt scaling extrapolates to its asymptote outside the training range. Rather than quote an unreachable floor, the app flags the application as out of range and leads with the rules. |
 | Model loaded per worker | Memory × workers | ~15 MB for a calibrated linear model. Would matter for a large ensemble. |
 | Exact dependency pins | Manual upgrades | The bundle is a pickle, so scikit-learn and numpy are part of the artifact contract. `pip-audit` runs weekly in CI so the pins cannot rot unnoticed. |
 | Bundle committed *and* trained in the Docker build | A binary in git, plus ~30s of build time | The committed bundle makes clone-and-run work and lets CI verify the contract; the build-time train guarantees the image's artifact matches the image's libraries. Each covers the other's weakness. |

@@ -699,6 +699,16 @@ actually happened in that band.
 Uncalibrated Brier score: {metrics["holdout_uncalibrated"]["brier_score"]:.4f} ·
 Calibrated: {metrics["holdout_calibrated"]["brier_score"]:.4f}.
 
+**Calibration imposes a probability floor.** Platt scaling is fitted on the
+training range, so inputs far outside it extrapolate to the sigmoid's
+asymptote rather than toward zero. In practice this model cannot return much
+below 0.20: an application with no income and an implausible loan still scores
+there. That is a property of the method, not a bug, but it means the number is
+meaningless outside the training range — so the application detects that case
+(`loanapp.assessment._extrapolation_reason`) and withholds the probability
+rather than quoting a floor it cannot escape. The deterministic rules answer
+those cases instead.
+
 ## Response-surface check
 
 The product answers "what would improve my chances?", so the model has to be

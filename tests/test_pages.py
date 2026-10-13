@@ -156,3 +156,50 @@ class TestErrorPages:
         assert response.status_code == 404
         assert b"<html" in response.data
         assert b"Traceback" not in response.data
+
+
+class TestReviewRegressions:
+    def test_non_numeric_prefill_id_is_not_a_500(self, registered_client):
+        """`int(request.args.get("from"))` made /apply?from=abc a 500."""
+        assert registered_client.get("/apply?from=abc").status_code == 200
+
+    def test_negative_and_huge_prefill_ids_are_handled(self, registered_client):
+        for value in ("-1", "0", "9" * 40, "", "1.5"):
+            assert registered_client.get(f"/apply?from={value}").status_code == 200
+
+    def test_result_page_states_the_training_size_not_the_holdout_size(self, client):
+        """It printed holdout_rows (123) as the number of applications the
+        model was trained on, understating the real 614 fivefold."""
+        body = client.post("/apply", data=form_with_csrf(client)).data.decode()
+        assert "614 historical applications" in body
+        assert "123 historical applications" not in body
+
+    def test_result_page_does_not_claim_zero_percent_of_no_income(self, client):
+        """A real instalment beside "Share of your income: 0%" read as free."""
+        body = client.post(
+            "/apply", data=form_with_csrf(client, applicant_income="0")
+        ).data.decode()
+        if "Share of your income" in body:
+            assert "no income declared" in body
+
+    def test_expired_csrf_on_a_form_post_explains_itself(self, client):
+        """It used to redirect to / with an ?error= nothing rendered, so the
+        applicant lost their answers with no message."""
+        client.get("/apply")  # establishes a session cookie
+        response = client.post(
+            "/apply",
+            data={**FORM, "csrf_token": "stale-and-wrong"},
+            follow_redirects=True,
+        )
+        assert response.status_code == 200
+        assert b"session expired" in response.data.lower()
+
+    def test_result_page_withholds_the_probability_when_out_of_range(self, client):
+        """A 20% floor quoted to someone with no income is worse than silence."""
+        body = client.post(
+            "/apply", data=form_with_csrf(client, applicant_income="0")
+        ).data.decode()
+        assert "No probability shown" in body
+        assert "Estimated approval probability" not in body
+        # The deterministic checks must still be there to answer the question.
+        assert "No income recorded" in body

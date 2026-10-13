@@ -110,6 +110,14 @@ PROPERTY_AREAS = ("rural", "semiurban", "urban")
 #: Loan amounts in ``data/train.csv`` are recorded in thousands.
 TRAINING_LOAN_AMOUNT_UNIT = 1_000
 
+#: Cap for the affordability ratios, and the value substituted when income is
+#: zero. Measured against ``data/train.csv``: the largest loan-to-income ratio
+#: there is 82.7 and the largest instalment-to-income ratio is 1.45, so this is
+#: far outside the approvable region. It costs nothing in accuracy — the
+#: training set contains no zero-income rows, so the scaler never sees this
+#: value and only inference is affected, where it saturates to a decline.
+RATIO_CEILING = 1_000.0
+
 
 @dataclass(frozen=True)
 class LoanApplication:
@@ -171,11 +179,26 @@ def engineer(app: LoanApplication, annual_rate: float) -> dict[str, float]:
     total_income = app.total_income
     emi = monthly_instalment(app.loan_amount, annual_rate, app.loan_term_months)
 
-    # Guard every ratio: a zero-income application is valid input to reject,
-    # not a reason to raise ZeroDivisionError inside the model.
-    loan_to_income = app.loan_amount / total_income if total_income > 0 else 0.0
-    emi_to_income = emi / total_income if total_income > 0 else 0.0
-    coapplicant_share = app.coapplicant_income / total_income if total_income > 0 else 0.0
+    # Zero income must not become zero *ratios*. A ratio of 0.0 is the best
+    # possible value on both of these features, so substituting it told the
+    # model that an applicant with no income could afford the loan more
+    # comfortably than anyone else — and the result page then showed a real
+    # monthly instalment next to "Share of your income: 0%".
+    #
+    # There is no finite ratio for "borrowing against no income", so we use the
+    # worst value the training data supports rather than inventing one: the
+    # ratio is capped at RATIO_CEILING, which sits far above any observed row
+    # and lands the application firmly in the decline region. The rules layer
+    # reports the real reason (``income_present``), which is what the applicant
+    # actually reads.
+    if total_income > 0:
+        loan_to_income = min(app.loan_amount / total_income, RATIO_CEILING)
+        emi_to_income = min(emi / total_income, RATIO_CEILING)
+        coapplicant_share = app.coapplicant_income / total_income
+    else:
+        loan_to_income = RATIO_CEILING if app.loan_amount > 0 else 0.0
+        emi_to_income = RATIO_CEILING if emi > 0 else 0.0
+        coapplicant_share = 0.0
 
     return {
         "credit_history": float(app.credit_history),

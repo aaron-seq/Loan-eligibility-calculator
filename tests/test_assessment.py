@@ -213,3 +213,46 @@ class TestGuidance:
             config=assessor.config,
         )
         assert suggestions == []
+
+
+class TestOutOfRange:
+    """The calibrated model cannot return a probability below ~0.20, because
+    Platt scaling extrapolates to its asymptote outside the training range.
+    Quoting that floor as a real chance would be dishonest."""
+
+    def test_the_floor_exists_and_is_well_above_zero(self, assessor):
+        """Documents the behaviour this whole class exists to handle."""
+        worst = LoanApplication(
+            0, 0, 50_000_000, 480, 0, 10, "not_graduate", True, "rural"
+        )
+        assert assessor.score(worst) > 0.1  # not ~0, as a naive reading expects
+
+    def test_zero_income_is_flagged_out_of_range(self, assessor):
+        result = assessor.assess(app(applicant_income=0, coapplicant_income=0))
+        assert result.out_of_range_reason is not None
+        assert "income" in result.out_of_range_reason
+
+    def test_absurd_loan_is_flagged_out_of_range(self, assessor):
+        result = assessor.assess(app(applicant_income=1, loan_amount=1_000_000_000))
+        assert result.out_of_range_reason is not None
+
+    def test_normal_application_is_not_flagged(self, assessor):
+        assert assessor.assess(app()).out_of_range_reason is None
+
+    def test_no_guidance_is_offered_when_the_number_is_meaningless(self, assessor):
+        """ "Borrow 10% less" is not useful advice to someone with no income."""
+        result = assessor.assess(app(applicant_income=0, coapplicant_income=0))
+        assert result.suggestions == []
+
+    def test_the_flag_is_serialised_for_api_clients(self, assessor):
+        payload = assessor.assess(app(applicant_income=0, coapplicant_income=0)).to_dict()
+        assert payload["out_of_range"] is True
+        assert payload["out_of_range_reason"]
+
+    def test_rules_still_state_the_real_reason(self, assessor):
+        """Suppressing the number is only acceptable because something else
+        answers the question."""
+        result = assessor.assess(app(applicant_income=0, coapplicant_income=0))
+        assert any(
+            r.code == "income_present" and r.severity == "fail" for r in result.rules
+        )

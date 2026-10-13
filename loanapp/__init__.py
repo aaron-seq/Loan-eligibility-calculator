@@ -95,6 +95,21 @@ def _load_model(app: Flask, config: Config) -> None:
         app.extensions["model_error"] = str(exc)
         app.logger.error("Model rejected: %s", exc)
         return
+    except Exception as exc:
+        # Anything else the loader can raise: a truncated or corrupt pickle, a
+        # permission error, a joblib version it cannot read. save_bundle is not
+        # atomic, so a build interrupted mid-write leaves exactly that.
+        #
+        # This has to be caught here. Letting it escape create_app crash-loops
+        # every worker on a condition a restart cannot fix, when the degraded
+        # path already exists and reports the reason on /api/health.
+        app.extensions["model_status"] = "load_failed"
+        app.extensions["model_error"] = (
+            f"{type(exc).__name__}: {exc}. The bundle may be corrupt or "
+            "truncated; retrain with: python -m loanapp.ml.train"
+        )
+        app.logger.exception("Model could not be loaded: %s", exc)
+        return
 
     app.extensions["assessor"] = Assessor(bundle, config)
     app.extensions["model_status"] = "ready"

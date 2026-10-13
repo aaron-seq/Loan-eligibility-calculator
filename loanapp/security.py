@@ -15,7 +15,7 @@ from collections import defaultdict, deque
 from collections.abc import Callable
 from functools import wraps
 
-from flask import current_app, g, jsonify, redirect, request, session, url_for
+from flask import current_app, flash, g, jsonify, redirect, request, session, url_for
 from werkzeug.security import check_password_hash, generate_password_hash
 
 CSRF_SESSION_KEY = "_csrf_token"
@@ -72,7 +72,19 @@ def validate_csrf() -> bool:
     supplied = request.headers.get(CSRF_HEADER) or request.form.get(CSRF_FORM_FIELD)
     if not supplied and request.is_json:
         supplied = (request.get_json(silent=True) or {}).get(CSRF_FORM_FIELD)
-    return bool(supplied) and hmac.compare_digest(str(supplied), str(expected))
+    if not supplied:
+        return False
+    # Compare as bytes. hmac.compare_digest raises TypeError on a str
+    # containing non-ASCII, so a token of "é" turned a 400 csrf_failed into an
+    # unhandled 500 — a trivially reachable crash on a public endpoint.
+    # errors="replace" keeps any input encodable without making two distinct
+    # tokens collide, since a mismatch is the only outcome that matters here.
+    try:
+        supplied_bytes = str(supplied).encode("utf-8", errors="replace")
+        expected_bytes = str(expected).encode("utf-8", errors="replace")
+    except (UnicodeError, AttributeError):
+        return False
+    return hmac.compare_digest(supplied_bytes, expected_bytes)
 
 
 def install_csrf(app) -> None:
@@ -107,7 +119,12 @@ def install_csrf(app) -> None:
                     "GET /api/csrf-token and send it in the X-CSRF-Token header.",
                 }
             ), 400
-        return redirect(url_for("pages.home", error="session_expired"))
+        flash(
+            "Your session expired before the form was submitted. "
+            "Please fill it in again.",
+            "error",
+        )
+        return redirect(url_for("pages.apply_form"))
 
     app.jinja_env.globals["csrf_token"] = csrf_token
 
@@ -132,12 +149,23 @@ class RateLimiter:
     one a Redis backend would implement.
     """
 
+    #: Cap on distinct tracked keys. Without it the dict is an unbounded,
+    #: attacker-controlled allocation: every new client IP (or every spoofed
+    #: forwarded address) adds an entry that is never collected. At the limit
+    #: we evict the stalest bucket, which can forgive a request but cannot
+    #: exhaust memory.
+    MAX_KEYS = 100_000
+
     def __init__(self) -> None:
         self._hits: dict[str, deque[float]] = defaultdict(deque)
 
     def check(self, key: str, limit: int, window_seconds: int) -> tuple[bool, int]:
         """Return ``(allowed, retry_after_seconds)``."""
         now = time.monotonic()
+
+        if key not in self._hits and len(self._hits) >= self.MAX_KEYS:
+            self._evict_stalest(now, window_seconds)
+
         hits = self._hits[key]
         while hits and now - hits[0] > window_seconds:
             hits.popleft()
@@ -145,6 +173,18 @@ class RateLimiter:
             return False, int(window_seconds - (now - hits[0])) + 1
         hits.append(now)
         return True, 0
+
+    def _evict_stalest(self, now: float, window_seconds: int) -> None:
+        """Drop fully-expired buckets, or the oldest if none have expired."""
+        expired = [
+            k for k, v in self._hits.items() if not v or now - v[-1] > window_seconds
+        ]
+        if expired:
+            for k in expired:
+                del self._hits[k]
+            return
+        oldest = min(self._hits, key=lambda k: self._hits[k][-1])
+        del self._hits[oldest]
 
     def reset(self) -> None:
         self._hits.clear()
@@ -154,16 +194,30 @@ limiter = RateLimiter()
 
 
 def client_identifier() -> str:
-    """Best-effort client identity.
+    """Best-effort client identity for rate limiting.
 
-    ``X-Forwarded-For`` is only trusted when ``TRUSTED_PROXY`` is set, because
-    a spoofable header would otherwise let a caller mint a fresh rate-limit
-    bucket per request.
+    ``X-Forwarded-For`` is only consulted when ``TRUSTED_PROXY`` is set, and
+    then the **right-most** hop is used, not the left-most.
+
+    That direction matters. A standard proxy *appends* the peer it saw, so the
+    list reads ``<client-supplied>, <real client>, <inner proxy>``. Taking
+    ``[0]`` therefore reads a value the caller fully controls: with
+    ``TRUSTED_PROXY=1`` an attacker could send a different
+    ``X-Forwarded-For`` on every request and get a fresh rate-limit bucket each
+    time, bypassing the limiter entirely. The last entry is the one the nearest
+    trusted proxy wrote and is the furthest an unprivileged caller can reach.
+
+    If your topology has more than one proxy in front of the app, the correct
+    index is deeper; ``TRUSTED_PROXY_DEPTH`` sets how many hops to skip from
+    the right.
     """
     if current_app.config.get("TRUSTED_PROXY"):
         forwarded = request.headers.get("X-Forwarded-For", "")
         if forwarded:
-            return forwarded.split(",")[0].strip()
+            hops = [h.strip() for h in forwarded.split(",") if h.strip()]
+            if hops:
+                depth = max(1, int(current_app.config.get("TRUSTED_PROXY_DEPTH", 1)))
+                return hops[-min(depth, len(hops))]
     return request.remote_addr or "unknown"
 
 
@@ -188,7 +242,8 @@ def rate_limit(limit_name: str) -> Callable:
                 response.status_code = 429
                 response.headers["Retry-After"] = str(retry_after)
                 return response
-            return redirect(url_for("pages.home", error="rate_limited"))
+            flash(message, "error")
+            return redirect(url_for("pages.apply_form"))
 
         return wrapper
 

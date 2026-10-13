@@ -146,6 +146,23 @@ def load_config(env: str | None = None) -> Config:
     database_path = os.environ.get("DATABASE_PATH", default_database)
     model_dir = os.environ.get("MODEL_DIR", str(BASE_DIR / "models"))
 
+    samesite = os.environ.get("SESSION_COOKIE_SAMESITE", "Lax").strip().capitalize()
+    # Validated because it is the one cookie setting passed straight through to
+    # Werkzeug. An unrecognised value makes Werkzeug raise while *setting the
+    # cookie*, i.e. on every response that touches the session — so a typo here
+    # takes down every page rather than degrading one setting.
+    if samesite not in ("Lax", "Strict", "None"):
+        raise ConfigError(
+            f"SESSION_COOKIE_SAMESITE must be Lax, Strict or None; got {samesite!r}"
+        )
+    if samesite == "None" and not _bool("SESSION_COOKIE_SECURE", env == "production"):
+        # Browsers reject SameSite=None without Secure, which silently drops
+        # the session cookie rather than erroring.
+        raise ConfigError(
+            "SESSION_COOKIE_SAMESITE=None requires SESSION_COOKIE_SECURE=true; "
+            "browsers reject the cookie otherwise."
+        )
+
     config = Config(
         env=env,
         secret_key=secret_key,
@@ -153,7 +170,7 @@ def load_config(env: str | None = None) -> Config:
         model_dir=model_dir,
         session_lifetime_seconds=_int("SESSION_LIFETIME_SECONDS", 3600),
         cookie_secure=_bool("SESSION_COOKIE_SECURE", env == "production"),
-        cookie_samesite=os.environ.get("SESSION_COOKIE_SAMESITE", "Lax"),
+        cookie_samesite=samesite,
         annual_interest_rate=_float("ANNUAL_INTEREST_RATE", 0.105),
         max_emi_to_income=_float("MAX_EMI_TO_INCOME", 0.50),
         approve_threshold=_float("APPROVE_THRESHOLD", 0.65),

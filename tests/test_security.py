@@ -274,3 +274,103 @@ class TestAccessControl:
     def test_no_default_admin_account_exists(self, app):
         """The previous version auto-created admin/admin123 on first boot."""
         assert app.extensions["user_repository"].find("admin") is None
+
+
+class TestReviewRegressions:
+    """Each of these reproduces a defect found in code review of this branch."""
+
+    def test_non_ascii_csrf_token_is_rejected_not_a_500(self, registered_client):
+        """``hmac.compare_digest`` raises TypeError on non-ASCII ``str``, so a
+        one-character token turned a 400 into an unhandled 500 on a public
+        endpoint."""
+        response = registered_client.post(
+            "/api/assess",
+            json={
+                "applicant_income": 50_000,
+                "loan_amount": 1_000_000,
+                "loan_term_months": 240,
+                "credit_history": 1,
+            },
+            headers={"X-CSRF-Token": "é" * 20},
+        )
+        assert response.status_code == 400
+        assert response.get_json()["error"] == "csrf_failed"
+
+    def test_forwarded_for_uses_the_rightmost_hop(self, app):
+        """A proxy *appends* the peer it saw, so the left-most entry is
+        caller-controlled. Reading it let an attacker mint a fresh rate-limit
+        bucket per request by varying the header."""
+        from loanapp.security import client_identifier
+
+        app.config["TRUSTED_PROXY"] = True
+        with app.test_request_context(
+            "/", headers={"X-Forwarded-For": "1.1.1.1, 2.2.2.2, 3.3.3.3"}
+        ):
+            assert client_identifier() == "3.3.3.3"
+
+    def test_forwarded_for_is_ignored_without_a_trusted_proxy(self, app):
+        from loanapp.security import client_identifier
+
+        app.config["TRUSTED_PROXY"] = False
+        with app.test_request_context("/", headers={"X-Forwarded-For": "9.9.9.9"}):
+            assert client_identifier() != "9.9.9.9"
+
+    def test_spoofed_forwarded_for_cannot_bypass_the_rate_limit(self, app):
+        """The whole point of the previous two tests, end to end."""
+        app.config["TRUSTED_PROXY"] = True
+        app.config["RATE_LIMITS"]["predict"] = (2, 60)
+        client = app.test_client()
+        payload = {
+            "applicant_income": 50_000,
+            "loan_amount": 1_000_000,
+            "loan_term_months": 240,
+            "credit_history": 1,
+        }
+        codes = [
+            client.post(
+                "/api/assess",
+                json=payload,
+                headers={"X-Forwarded-For": f"10.0.0.{i}, 2.2.2.2"},
+            ).status_code
+            for i in range(4)
+        ]
+        # All four vary the left-most hop; the real hop is constant, so the
+        # limit must still bite.
+        assert 429 in codes, codes
+
+    def test_rate_limiter_does_not_grow_without_bound(self):
+        """``_hits`` was an attacker-controlled unbounded allocation."""
+        from loanapp.security import RateLimiter
+
+        limiter = RateLimiter()
+        limiter.MAX_KEYS = 50
+        for i in range(500):
+            limiter.check(f"key-{i}", limit=10, window_seconds=60)
+        assert len(limiter._hits) <= 50
+
+    def test_invalid_samesite_is_rejected_at_startup(self, monkeypatch):
+        """Werkzeug raises while *setting* the cookie, so a typo here breaks
+        every response rather than one setting."""
+        from loanapp.config import ConfigError, load_config
+
+        monkeypatch.setenv("SECRET_KEY", "k" * 40)
+        monkeypatch.setenv("SESSION_COOKIE_SAMESITE", "Lx")
+        with pytest.raises(ConfigError, match="SAMESITE"):
+            load_config("development")
+
+    def test_samesite_none_requires_secure(self, monkeypatch):
+        """Browsers silently drop SameSite=None without Secure."""
+        from loanapp.config import ConfigError, load_config
+
+        monkeypatch.setenv("SECRET_KEY", "k" * 40)
+        monkeypatch.setenv("SESSION_COOKIE_SAMESITE", "None")
+        monkeypatch.setenv("SESSION_COOKIE_SECURE", "false")
+        with pytest.raises(ConfigError, match="SESSION_COOKIE_SECURE"):
+            load_config("development")
+
+    def test_samesite_is_normalised(self, monkeypatch):
+        from loanapp.config import load_config
+
+        monkeypatch.setenv("SECRET_KEY", "k" * 40)
+        monkeypatch.setenv("SESSION_COOKIE_SAMESITE", "strict")
+        assert load_config("development").cookie_samesite == "Strict"

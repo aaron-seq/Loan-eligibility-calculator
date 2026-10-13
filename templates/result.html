@@ -15,22 +15,43 @@
   <section class="rounded-lg border {{ border }} {{ bg }} p-6">
     <p class="text-sm font-medium {{ text }}">Your estimate</p>
     <h1 class="mt-1 text-3xl font-bold text-slate-900">{{ assessment.band_label }}</h1>
-    <div class="mt-4">
-      <div class="flex items-baseline justify-between text-sm {{ text }}">
-        <span>Estimated approval probability</span>
-        <span class="text-2xl font-bold">{{ (assessment.probability * 100)|round|int }}%</span>
+    {# A calibrated model has a probability floor — Platt scaling extrapolates
+       to its asymptote outside the training range, about 0.20 here. Quoting
+       that to someone with no income would be worse than quoting nothing, so
+       the number is withheld and the rules below carry the answer. #}
+    {% if assessment.out_of_range_reason %}
+      <div class="mt-4 rounded-md bg-white/60 px-4 py-3 text-sm {{ text }}">
+        <p class="font-medium">No probability shown</p>
+        <p class="mt-1">
+          We can't give a meaningful percentage because
+          {{ assessment.out_of_range_reason }}. The checks below are the real answer.
+        </p>
       </div>
-      <div class="mt-2 h-2 w-full rounded-full bg-white/70 overflow-hidden">
-        <div class="h-full {{ bar }}" style="width: {{ (assessment.probability * 100)|round|int }}%"></div>
+    {% else %}
+      <div class="mt-4">
+        <div class="flex items-baseline justify-between text-sm {{ text }}">
+          <span>Estimated approval probability</span>
+          <span class="text-2xl font-bold">{{ (assessment.probability * 100)|round|int }}%</span>
+        </div>
+        <div class="mt-2 h-2 w-full rounded-full bg-white/70 overflow-hidden">
+          <div class="h-full {{ bar }}" style="width: {{ (assessment.probability * 100)|round|int }}%"></div>
+        </div>
       </div>
-    </div>
-    <p class="mt-4 text-sm {{ text }}">
+    {% endif %}
+    <p class="mt-4 text-sm {{ text }}" {% if assessment.out_of_range_reason %}hidden{% endif %}>
       {# State the accuracy alongside the number rather than in a footnote. A
          probability shown without its error bar invites more trust than it has
          earned. #}
-      This comes from a model with a holdout ROC-AUC of
+      {# holdout_rows is the *test* split (123), not the training-set size.
+         Printing it here claimed the model saw a fifth of the data it actually
+         saw — exactly the kind of inflated-sounding-but-wrong number this
+         project exists to avoid. Both figures are now stated for what they
+         are. #}
+      This comes from a model trained on
+      {{ assessment.model_training_rows }} historical applications, scoring a
+      holdout ROC-AUC of
       {{ '%.2f'|format(assessment.model_metrics.get('roc_auc', 0)) }}
-      trained on {{ assessment.model_metrics.get('holdout_rows', 0) + 0 }}+ historical applications.
+      on {{ assessment.model_metrics.get('holdout_rows', 0) }} held-back cases.
       <a href="{{ url_for('pages.how_it_works') }}" class="underline">See how accurate that is</a>.
     </p>
   </section>
@@ -53,7 +74,13 @@
       <div class="rounded-md bg-slate-50 p-4">
         <dt class="text-slate-500">Share of your income</dt>
         <dd class="mt-1 text-xl font-semibold text-slate-900">
-          {{ (assessment.affordability.emi_to_income * 100)|round|int }}%
+          {# With no declared income the ratio is undefined, not 0%. Showing
+             "0%" beside a real instalment read as "this is free". #}
+          {% if assessment.affordability.total_income > 0 %}
+            {{ (assessment.affordability.emi_to_income * 100)|round|int }}%
+          {% else %}
+            <span class="text-base text-slate-500">no income declared</span>
+          {% endif %}
         </dd>
       </div>
       <div class="rounded-md bg-slate-50 p-4">

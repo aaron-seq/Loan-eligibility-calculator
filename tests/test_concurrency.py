@@ -105,6 +105,67 @@ def test_concurrent_worker_startup_leaves_a_consistent_database(tmp_path):
         connection.close()
 
 
+@pytest.mark.slow
+def test_schema_version_insert_is_genuinely_idempotent(tmp_path):
+    """Regression: the ``INSERT OR IGNORE`` was a no-op.
+
+    ``schema_version`` had no UNIQUE or PRIMARY KEY, so there was nothing for
+    OR IGNORE to conflict on, and ``initialise`` still did check-then-act. A
+    code review reproduced 6 rows from 6 concurrent initialisers; the earlier
+    test asserting ``COUNT == 1`` passed only by timing luck.
+
+    This drives ``initialise`` directly with 12 workers. Every one of them now
+    inserts unconditionally — the pre-check is gone — so OR IGNORE against the
+    PRIMARY KEY is the only thing keeping the count at one. If the constraint
+    is dropped, this fails every run rather than occasionally.
+    """
+    database = tmp_path / "idempotent.db"
+    code = (
+        f"import sys; sys.path.insert(0, r'{REPO_ROOT}');"
+        f"from loanapp.db import initialise; initialise(r'{database}')"
+    )
+    processes = [
+        subprocess.Popen(  # noqa: S603
+            [sys.executable, "-c", code], stderr=subprocess.PIPE
+        )
+        for _ in range(12)
+    ]
+    failures = []
+    for process in processes:
+        _, stderr = process.communicate(timeout=180)
+        if process.returncode != 0:
+            text = stderr.decode(errors="replace").strip()
+            failures.append(text.splitlines()[-1] if text else "no stderr")
+
+    assert not failures, "initialisers failed: " + "; ".join(failures)
+
+    connection = sqlite3.connect(str(database))
+    try:
+        assert (
+            connection.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == 1
+        )
+    finally:
+        connection.close()
+
+
+def test_schema_version_has_a_uniqueness_constraint(tmp_path):
+    """The cheap, deterministic half of the test above: without this
+    constraint the OR IGNORE above is silently meaningless."""
+    from loanapp.db import initialise
+
+    database = str(tmp_path / "constraint.db")
+    initialise(database)
+
+    connection = sqlite3.connect(database)
+    try:
+        ddl = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'schema_version'"
+        ).fetchone()[0]
+        assert "PRIMARY KEY" in ddl.upper() or "UNIQUE" in ddl.upper(), ddl
+    finally:
+        connection.close()
+
+
 def test_pragmas_are_applied_per_connection(tmp_path):
     """``foreign_keys`` is off by default in SQLite, so the FK that
     ``applications`` declares against ``users`` would never be enforced."""

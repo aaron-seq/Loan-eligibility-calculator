@@ -25,7 +25,7 @@ import pandas as pd
 
 from .config import Config
 from .explain import Factor, Suggestion, explain, suggest_improvements
-from .features import FEATURE_COLUMNS, LoanApplication, engineer
+from .features import FEATURE_COLUMNS, RATIO_CEILING, LoanApplication, engineer
 from .ml.registry import ModelBundle
 from .rules import (
     Affordability,
@@ -50,6 +50,35 @@ BAND_LABELS = {
     "unlikely": "Unlikely to be approved",
 }
 
+OUT_OF_RANGE_NOTE = (
+    "This application is outside the range the model was trained on, so no "
+    "meaningful probability can be given for it. The checks below are the "
+    "real answer."
+)
+
+
+def _extrapolation_reason(app: LoanApplication, features: dict[str, float]) -> str | None:
+    """Why this application sits outside the model's usable range, if it does.
+
+    This exists because the calibrated model has a **hard probability floor of
+    about 0.20**: Platt scaling is fitted on the training range, and anything
+    far outside it extrapolates to the sigmoid's asymptote rather than to zero.
+    So the worst conceivable application — no income, a 50,000,000 request,
+    adverse credit — was still shown "20%".
+
+    For a tool whose premise is an honest number, quoting a floor that cannot
+    be escaped is worse than quoting nothing. When this returns a reason the
+    caller suppresses the probability and leads with the deterministic rules,
+    which can state the actual problem.
+    """
+    if app.total_income <= 0:
+        return "no household income was declared"
+    if features["loan_to_income_ratio"] >= RATIO_CEILING:
+        return "the loan is implausibly large relative to income"
+    if features["emi_to_income_ratio"] >= RATIO_CEILING:
+        return "the monthly instalment is implausibly large relative to income"
+    return None
+
 
 @dataclass
 class Assessment:
@@ -66,6 +95,13 @@ class Assessment:
     model_version: str
     model_calibrated: bool
     model_metrics: dict[str, Any] = field(default_factory=dict)
+    #: Rows the model was fitted on. Distinct from metrics["holdout_rows"],
+    #: which is the held-back test split; conflating them understated the
+    #: training set by a factor of five on the result page.
+    model_training_rows: int = 0
+    #: Set when the application sits outside the model's usable range. The
+    #: probability is then not meaningful and must not be presented as one.
+    out_of_range_reason: str | None = None
     assessed_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -90,8 +126,11 @@ class Assessment:
                 "version": self.model_version,
                 "calibrated": self.model_calibrated,
                 "metrics": self.model_metrics,
+                "training_rows": self.model_training_rows,
             },
             "assessed_at": self.assessed_at,
+            "out_of_range": self.out_of_range_reason is not None,
+            "out_of_range_reason": self.out_of_range_reason,
             "disclaimer": DISCLAIMER,
         }
 
@@ -140,7 +179,11 @@ class Assessor:
         suggestions: list[Suggestion] = []
         # Someone already in the "likely" band does not need advice on how to
         # get there; showing it anyway would be filler.
-        if with_guidance and probability < self.config.approve_threshold:
+        if (
+            with_guidance
+            and probability < self.config.approve_threshold
+            and _extrapolation_reason(app, features) is None
+        ):
             suggestions = suggest_improvements(
                 app=app,
                 base_probability=probability,
@@ -148,6 +191,7 @@ class Assessor:
                 config=self.config,
             )
 
+        out_of_range_reason = _extrapolation_reason(app, features)
         band = self.band_for(probability)
         return Assessment(
             probability=probability,
@@ -161,6 +205,8 @@ class Assessor:
             model_version=self.bundle.version,
             model_calibrated=self.bundle.is_calibrated,
             model_metrics=self.bundle.metrics,
+            model_training_rows=int(self.bundle.metadata.get("training_rows", 0)),
+            out_of_range_reason=out_of_range_reason,
             assessed_at=datetime.now(UTC).isoformat(timespec="seconds"),
         )
 

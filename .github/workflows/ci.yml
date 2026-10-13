@@ -102,10 +102,16 @@ jobs:
           if not metrics["served_model_monotonicity"]["monotonic"]:
               failures.append("served model is not monotonic in loan amount")
 
-          # Beating the always-approve baseline is the floor, not the goal.
-          auc = metrics["holdout_calibrated"]["roc_auc"]
+          # Grade the model that actually ships. The trainer only keeps the
+          # calibrated variant when it improves the Brier score, so reading
+          # holdout_calibrated unconditionally could pass a model that was
+          # never served (or fail one that was).
+          served = (
+              "holdout_calibrated" if metrics["calibrated"] else "holdout_uncalibrated"
+          )
+          auc = metrics[served]["roc_auc"]
           if auc < 0.70:
-              failures.append(f"holdout ROC-AUC {auc} below the 0.70 floor")
+              failures.append(f"served ({served}) ROC-AUC {auc} below the 0.70 floor")
 
           # Guards against a feature-set change landing without a retrain.
           from loanapp.features import FEATURE_COLUMNS
@@ -115,7 +121,7 @@ jobs:
           if failures:
               print("\n".join(f"FAIL: {f}" for f in failures))
               sys.exit(1)
-          print(f"OK - ROC-AUC {auc}, monotonic, contract matches")
+          print(f"OK - served={served} ROC-AUC={auc}, monotonic, contract matches")
           PY
 
       - name: Check the committed bundle is loadable and current

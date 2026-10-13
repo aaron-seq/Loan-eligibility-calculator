@@ -90,15 +90,50 @@ def test_unknown_property_area_falls_back_rather_than_raising():
 
 
 class TestZeroAndEdgeInputs:
-    """Ratios must degrade, not explode. A zero-income application is input to
-    reject, not a reason to raise ZeroDivisionError inside the model."""
+    """Ratios must degrade safely, and in the right direction."""
 
-    def test_zero_income_gives_zero_ratios(self):
+    def test_zero_income_gives_the_worst_ratios_not_the_best(self):
+        """Regression: the guard used to substitute 0.0.
+
+        0.0 is the *best* possible value for both affordability ratios, so a
+        zero-income application was being told it could service the loan more
+        comfortably than any real applicant. The substitute has to be the worst
+        value, not the most convenient one.
+        """
+        from loanapp.features import RATIO_CEILING
+
         app = LoanApplication(0, 0, 500_000, 240, 1, 0, "graduate", False, "urban")
+        features = engineer(app, RATE)
+        assert features["loan_to_income_ratio"] == RATIO_CEILING
+        assert features["emi_to_income_ratio"] == RATIO_CEILING
+        # No income means no co-applicant share to speak of; 0.0 is correct
+        # here because it is not an affordability signal.
+        assert features["coapplicant_share"] == 0.0
+
+    def test_zero_income_and_zero_loan_is_not_penalised(self):
+        """Nothing requested, nothing to afford — the ceiling would be wrong."""
+        app = LoanApplication(0, 0, 0, 240, 1, 0, "graduate", False, "urban")
         features = engineer(app, RATE)
         assert features["loan_to_income_ratio"] == 0.0
         assert features["emi_to_income_ratio"] == 0.0
-        assert features["coapplicant_share"] == 0.0
+
+    def test_ratios_are_capped_for_real_applications_too(self):
+        """An absurd request must not produce an unbounded feature value."""
+        from loanapp.features import RATIO_CEILING
+
+        app = LoanApplication(1, 0, 10_000_000_000, 240, 1, 0, "graduate", False, "urban")
+        features = engineer(app, RATE)
+        assert features["loan_to_income_ratio"] == RATIO_CEILING
+        assert features["emi_to_income_ratio"] == RATIO_CEILING
+
+    def test_the_cap_does_not_touch_plausible_applications(self):
+        """Measured: the largest loan-to-income ratio in train.csv is 82.7."""
+        from loanapp.features import RATIO_CEILING
+
+        app = LoanApplication(50_000, 0, 2_000_000, 240, 1, 0, "graduate", False, "urban")
+        features = engineer(app, RATE)
+        assert features["loan_to_income_ratio"] < RATIO_CEILING
+        assert features["emi_to_income_ratio"] < RATIO_CEILING
 
     def test_zero_term_gives_zero_instalment(self):
         assert monthly_instalment(100_000, RATE, 0) == 0.0

@@ -8,6 +8,7 @@ orders, with nothing comparing them.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 import sklearn
@@ -19,6 +20,7 @@ from loanapp.ml.registry import (
     ModelContractError,
     ModelUnavailable,
     _runtime_versions,
+    bundle_path,
     load_bundle,
     save_bundle,
 )
@@ -192,3 +194,61 @@ def test_the_shipped_bundle_matches_the_current_contract(trained_model_dir):
     """Guards against committing code that changes FEATURE_COLUMNS without
     retraining."""
     assert tuple(load_bundle(trained_model_dir).feature_columns) == FEATURE_COLUMNS
+
+
+class TestCorruptBundle:
+    """``save_bundle`` is not atomic, so an interrupted build leaves a
+    truncated pickle. The loader must degrade, not crash-loop every worker."""
+
+    def _app(self, tmp_path, model_dir):
+        from loanapp import create_app
+        from loanapp.config import Config
+
+        return create_app(
+            Config(
+                env="testing",
+                secret_key="k" * 40,
+                database_path=str(tmp_path / "t.db"),
+                model_dir=str(model_dir),
+                cookie_secure=False,
+            )
+        )
+
+    def test_truncated_bundle_degrades_instead_of_raising(self, tmp_path):
+        model_dir = tmp_path / "models"
+        model_dir.mkdir()
+        save_bundle(bundle(), str(model_dir))
+
+        path = bundle_path(str(model_dir))
+        intact = Path(path).read_bytes()
+        Path(path).write_bytes(intact[: len(intact) // 2])  # interrupted write
+
+        app = self._app(tmp_path, model_dir)
+        assert app.extensions["model_status"] == "load_failed"
+        assert "retrain" in app.extensions["model_error"]
+
+        # Everything that does not need the model still works...
+        client = app.test_client()
+        assert client.get("/").status_code == 200
+        health = client.get("/api/health")
+        assert health.status_code == 200
+        assert health.get_json()["status"] == "degraded"
+        # ...and assessment fails with an actionable 503, not a 500.
+        assert (
+            client.post(
+                "/api/assess",
+                json={
+                    "applicant_income": 1,
+                    "loan_amount": 1,
+                    "loan_term_months": 12,
+                    "credit_history": 1,
+                },
+            ).status_code
+            == 503
+        )
+
+    def test_garbage_bundle_degrades(self, tmp_path):
+        model_dir = tmp_path / "models"
+        model_dir.mkdir()
+        Path(bundle_path(str(model_dir))).write_bytes(b"not a pickle at all")
+        assert self._app(tmp_path, model_dir).extensions["model_status"] == "load_failed"

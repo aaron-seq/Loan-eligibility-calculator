@@ -26,7 +26,10 @@ logger = logging.getLogger(__name__)
 SCHEMA_VERSION = 1
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
+-- PRIMARY KEY, not a bare column: it is what gives INSERT OR IGNORE in
+-- initialise() something to conflict on. Without a uniqueness constraint
+-- OR IGNORE is a no-op and concurrent initialisers each append a row.
+CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);
 
 CREATE TABLE IF NOT EXISTS users (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,6 +58,15 @@ CREATE TABLE IF NOT EXISTS applications (
 CREATE INDEX IF NOT EXISTS idx_applications_user ON applications (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_applications_created ON applications (created_at DESC);
 """
+
+
+#: SQLite stores INTEGER as a signed 64-bit value and raises OverflowError on
+#: anything wider. Row ids arrive from URLs, so they are user input.
+MAX_ROW_ID = 2**63 - 1
+
+
+def _is_valid_row_id(value: Any) -> bool:
+    return isinstance(value, int) and 0 < value <= MAX_ROW_ID
 
 
 def now() -> str:
@@ -125,16 +137,16 @@ def initialise(database_path: str) -> None:
     with connect(database_path) as conn:
         _enable_wal(conn)
         conn.executescript(SCHEMA)
-        row = conn.execute("SELECT version FROM schema_version").fetchone()
-        if row is None:
-            # OR IGNORE rather than a bare INSERT: every gunicorn worker runs
-            # this path concurrently against one file, so two can both observe
-            # an empty table. Without it the loser dies on the constraint
-            # before it can serve a request.
-            conn.execute(
-                "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",
-                (SCHEMA_VERSION,),
-            )
+        # Unconditional INSERT OR IGNORE, with no SELECT first. The read was
+        # the bug: checking for an empty table and then inserting is
+        # check-then-act, and every gunicorn worker runs this path
+        # concurrently against one file, so several can all observe it empty.
+        # OR IGNORE against the PRIMARY KEY in SCHEMA makes the insert
+        # idempotent, which removes the race rather than narrowing it.
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",
+            (SCHEMA_VERSION,),
+        )
 
 
 class UserRepository:
@@ -230,7 +242,14 @@ class ApplicationRepository:
         ``user_id`` scopes the lookup to an owner. Callers serving a logged-in
         user must always pass it — filtering in SQL rather than after the fetch
         is what keeps this from becoming an IDOR.
+
+        Returns ``None`` for an out-of-range id rather than letting it reach
+        SQLite, which raises ``OverflowError`` on anything wider than 64 bits.
+        A URL is user input, so that was a 500 on ``?from=999…9``.
         """
+        if not _is_valid_row_id(application_id):
+            return None
+
         query = "SELECT * FROM applications WHERE id = ?"
         params: list[Any] = [application_id]
         if user_id is not None:
@@ -247,6 +266,8 @@ class ApplicationRepository:
         return record
 
     def delete(self, application_id: int, user_id: str) -> bool:
+        if not _is_valid_row_id(application_id):
+            return False
         with connect(self.database_path) as conn:
             cursor = conn.execute(
                 "DELETE FROM applications WHERE id = ? AND user_id = ?",

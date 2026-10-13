@@ -62,11 +62,11 @@ def apply_form():
     field and re-run it, which is the most common real interaction.
     """
     prefill = {}
-    prefill_id = request.args.get("from")
+    prefill_id = request.args.get("from", type=int)  # non-numeric -> None, not a 500
     user = current_user()
     if prefill_id and user:
         record = current_app.extensions["application_repository"].get(
-            int(prefill_id), user_id=user["user_id"]
+            prefill_id, user_id=user["user_id"]
         )
         if record:
             prefill = record["payload"]
