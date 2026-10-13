@@ -13,12 +13,15 @@ which meant every change to the feature set was a migration.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
 
@@ -63,17 +66,27 @@ def connect(database_path: str) -> Iterator[sqlite3.Connection]:
     """Open a connection with sane defaults, committing on clean exit.
 
     A fresh connection per request keeps things simple and thread-safe. The
-    previous code held one module-level cursor shared across every request,
+    original code held one module-level cursor shared across every request,
     which is neither.
+
+    Two PRAGMAs are set here, and one deliberately is not:
+
+    - ``busy_timeout`` makes a blocked writer wait for the lock rather than
+      failing instantly. It is set first, because it governs how long
+      everything after it will wait.
+    - ``foreign_keys`` is off by default in SQLite, so the foreign key
+      ``applications`` declares against ``users`` would otherwise never be
+      enforced and orphan rows would be accepted silently.
+    - ``journal_mode=WAL`` is **not** set here. See :func:`initialise`.
     """
     directory = os.path.dirname(os.path.abspath(database_path))
     if directory:
         os.makedirs(directory, exist_ok=True)
 
-    conn = sqlite3.connect(database_path, timeout=10)
+    conn = sqlite3.connect(database_path, timeout=30)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout=30000")
+    conn.execute("PRAGMA foreign_keys=ON")
     try:
         yield conn
         conn.commit()
@@ -84,13 +97,43 @@ def connect(database_path: str) -> Iterator[sqlite3.Connection]:
         conn.close()
 
 
+def _enable_wal(conn: sqlite3.Connection) -> None:
+    """Switch the database to WAL journalling, once.
+
+    WAL lets readers run concurrently with a writer; under the default rollback
+    journal, one in-flight write blocks every read, which surfaces as
+    "database is locked" as soon as two requests overlap.
+
+    This is deliberately *not* in :func:`connect`. Switching the journal mode
+    needs an exclusive lock and SQLite does not reliably invoke the busy
+    handler for it, so running it per-connection makes concurrent gunicorn
+    workers collide on startup and die before serving a request. WAL is a
+    persistent property of the database file, so setting it once is enough and
+    every later connection inherits it — including losing the race to another
+    worker, which is why failure here is tolerated.
+    """
+    try:
+        mode = conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+        if str(mode).lower() != "wal":
+            logger.warning("Could not enable WAL; journal_mode is %r", mode)
+    except sqlite3.OperationalError as exc:
+        # Another worker is mid-switch. Whoever wins sets it for everyone.
+        logger.debug("WAL not set on this worker: %s", exc)
+
+
 def initialise(database_path: str) -> None:
     with connect(database_path) as conn:
+        _enable_wal(conn)
         conn.executescript(SCHEMA)
         row = conn.execute("SELECT version FROM schema_version").fetchone()
         if row is None:
+            # OR IGNORE rather than a bare INSERT: every gunicorn worker runs
+            # this path concurrently against one file, so two can both observe
+            # an empty table. Without it the loser dies on the constraint
+            # before it can serve a request.
             conn.execute(
-                "INSERT INTO schema_version (version) VALUES (?)", (SCHEMA_VERSION,)
+                "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",
+                (SCHEMA_VERSION,),
             )
 
 

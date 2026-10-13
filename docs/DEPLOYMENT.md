@@ -6,8 +6,9 @@
 applications, an admin view — and a container gives it a real filesystem and a
 persistent volume.
 
-Vercel still works, but only as a **stateless demo**. That is a real constraint,
-not a configuration problem, and the reasoning is below.
+Serverless (Vercel, Lambda) is **not a supported target** and `vercel.json` has
+been removed. That is a real constraint, not a configuration problem, and the
+reasoning is below.
 
 ---
 
@@ -78,47 +79,38 @@ and move to Postgres before running more than one instance.
 
 ---
 
-## Vercel (demo only)
+## Why not serverless
 
-`vercel.json` is configured and works:
+`vercel.json` used to be in this repository. It was removed, because the
+application is stateful and the platform cannot hold that state.
 
-```bash
-vercel --prod
-# then set SECRET_KEY in the project's environment variables
-```
+### What would work
 
-### What works
+Anonymous assessment — the form, the result page, factor explanations,
+guidance, affordability, `/api/assess`, `/api/compare`, `/api/model-card`.
 
-Anonymous assessment — the form, the result page, factor explanations, guidance,
-affordability, `/api/assess`, `/api/compare`, `/api/model-card`. This is the
-majority of the product's value, and it is genuinely fine here.
+### What cannot
 
-### What does not
-
-Accounts, sign-in, saved applications, and the admin view. Two reasons, neither
+Accounts, sign-in, saved applications, and the admin view. Three reasons, none
 fixable by configuration:
 
 1. **The filesystem is read-only outside `/tmp`.** SQLite cannot open a
    writable database anywhere else.
-2. **`/tmp` does not persist.** It is destroyed on cold start and is not shared
-   between concurrent lambda instances. A user can register and be signed out
-   moments later because the next request landed on a different instance whose
-   database has never heard of them.
+2. **`/tmp` does not persist.** It is destroyed on cold start.
+3. **`/tmp` is not shared between instances.** A user can register and be
+   signed out moments later because the next request landed on a different
+   instance whose database has never heard of them.
 
-The app detects a serverless environment, defaults `DATABASE_PATH` to `/tmp`, and
-logs a warning at startup. It does not pretend the data persists.
+A config that silently loses user data is worse than no config, so the honest
+move was to delete it rather than ship it with a caveat in the README.
 
-### Also worth knowing
+`loanapp/config.py` still detects `VERCEL` and `AWS_LAMBDA_FUNCTION_NAME`,
+defaults `DATABASE_PATH` to `/tmp`, and logs a warning — so anyone who deploys
+there deliberately gets a working anonymous-assessment demo and an explicit
+statement that nothing persists. It is just not a path this project recommends
+or maintains config for.
 
-The 50 MB lambda bundle limit is tight with pandas and scikit-learn. It fits
-today, and adding a large dependency may break it.
-
-### The honest recommendation
-
-If you want a public demo link and nothing else, Vercel is a reasonable choice —
-just present it as a demo. If you want accounts and history, deploy the
-container. Trying to force durable state onto a read-only ephemeral filesystem
-is the mismatch, not a bug to work around.
+The 50 MB lambda bundle limit is also tight with pandas and scikit-learn.
 
 ---
 

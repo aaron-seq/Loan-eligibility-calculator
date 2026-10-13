@@ -143,11 +143,13 @@ docker run -p 8000:8000 \
   loanwise
 ```
 
-**Vercel works, but only as a stateless demo.** The filesystem is read-only
-outside `/tmp` and `/tmp` is destroyed on every cold start, so accounts and
-saved applications do not survive. Anonymous assessment is unaffected. The app
-detects this and logs a warning rather than pretending otherwise. Full
-discussion of the trade-off and the migration path to Postgres:
+**Serverless is not a supported target.** `vercel.json` was removed: the
+filesystem is read-only outside `/tmp`, `/tmp` is destroyed on every cold
+start, and it is not shared between concurrent instances — so accounts and
+saved applications cannot survive. Anonymous assessment would work, but
+shipping a config that silently loses user data is worse than not shipping one.
+The app still detects a serverless environment and warns, for anyone who
+deploys there deliberately. Full discussion and the migration path to Postgres:
 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## Security

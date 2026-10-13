@@ -190,6 +190,8 @@ endpoint is protected by default rather than by remembering.
 | One-at-a-time attribution | Misses interactions | Exact, cheap, no extra dependency. Stated plainly rather than sold as SHAP. |
 | Model loaded per worker | Memory × workers | ~15 MB for a calibrated linear model. Would matter for a large ensemble. |
 | Exact dependency pins | Manual upgrades | The bundle is a pickle, so scikit-learn and numpy are part of the artifact contract. `pip-audit` runs weekly in CI so the pins cannot rot unnoticed. |
+| Bundle committed *and* trained in the Docker build | A binary in git, plus ~30s of build time | The committed bundle makes clone-and-run work and lets CI verify the contract; the build-time train guarantees the image's artifact matches the image's libraries. Each covers the other's weakness. |
+| WAL set once at init, not per connection | `initialise` must run before first use | A journal-mode switch needs an exclusive lock and SQLite does not reliably invoke the busy handler for it. Ported from `main`; see `tests/test_concurrency.py` for the honest limits of the test coverage. |
 
 ## Adding a feature to the model
 
