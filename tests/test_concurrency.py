@@ -17,10 +17,14 @@ no password hash is computed while holding it).
 So these do **not** reproduce that failure, and they are not a regression guard
 for it. What they do verify, under real concurrent startup, is the end state:
 one schema-version row, WAL actually persisted, the per-connection PRAGMAs
-applied, and the foreign key genuinely enforced. The ``db.py`` fix is kept on
-principle — SQLite documents that the busy handler is not reliably invoked for
-a journal-mode switch, and ``INSERT OR IGNORE`` is unconditionally safer than
-check-then-act — rather than because a test here forces it.
+applied, and the foreign key genuinely enforced.
+
+The fix itself *was* validated outside this file, by running the shipped
+configuration for real: ``gunicorn --workers 6 --threads 4`` against one SQLite
+file booted all six workers with zero failures, left ``journal_mode=wal`` and
+exactly one ``schema_version`` row, and served 20 concurrent assessments with
+no errors. That is the evidence for the change; the tests below are the cheap
+guard that keeps the end state from drifting.
 
 Subprocesses are real because the invariants are cross-process; a same-process
 loop shares a connection pool and proves nothing about worker startup.

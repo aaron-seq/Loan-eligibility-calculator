@@ -25,8 +25,12 @@ RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 # Train against the versions just installed, so the pickle matches the runtime.
 COPY loanapp/ ./loanapp/
 COPY data/train.csv ./data/train.csv
-ENV PYTHONPATH=/install/lib/python3.13/site-packages
-RUN FLASK_ENV=development python -m loanapp.ml.train --model-dir /build/models --no-docs
+# The site-packages path is derived rather than hardcoded: writing
+# python3.13/site-packages couples this line to the base image tag above, and
+# bumping that tag would break the build in a way that looks unrelated.
+RUN PYTHONPATH="$(ls -d /install/lib/python*/site-packages)" \
+    FLASK_ENV=development \
+    python -m loanapp.ml.train --model-dir /build/models --no-docs
 
 
 FROM python:3.13-slim
