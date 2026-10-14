@@ -1,0 +1,216 @@
+{% extends "base.html" %}
+{% block title %}Your eligibility estimate — LoanWise{% endblock %}
+
+{% set band_style = {
+  'likely':     ('bg-emerald-50', 'border-emerald-200', 'text-emerald-800', 'bg-emerald-500'),
+  'borderline': ('bg-amber-50',   'border-amber-200',   'text-amber-900',   'bg-amber-500'),
+  'unlikely':   ('bg-rose-50',    'border-rose-200',    'text-rose-800',    'bg-rose-500')
+} %}
+{% set bg, border, text, bar = band_style[assessment.band] %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto space-y-6">
+
+  {# --- Headline ------------------------------------------------------- #}
+  <section class="rounded-lg border {{ border }} {{ bg }} p-6">
+    <p class="text-sm font-medium {{ text }}">Your estimate</p>
+    <h1 class="mt-1 text-3xl font-bold text-slate-900">{{ assessment.band_label }}</h1>
+    {# A calibrated model has a probability floor — Platt scaling extrapolates
+       to its asymptote outside the training range, about 0.20 here. Quoting
+       that to someone with no income would be worse than quoting nothing, so
+       the number is withheld and the rules below carry the answer. #}
+    {% if assessment.out_of_range_reason %}
+      <div class="mt-4 rounded-md bg-white/60 px-4 py-3 text-sm {{ text }}">
+        <p class="font-medium">No probability shown</p>
+        <p class="mt-1">
+          We can't give a meaningful percentage because
+          {{ assessment.out_of_range_reason }}. The checks below are the real answer.
+        </p>
+      </div>
+    {% else %}
+      <div class="mt-4">
+        <div class="flex items-baseline justify-between text-sm {{ text }}">
+          <span>Estimated approval probability</span>
+          <span class="text-2xl font-bold">{{ (assessment.probability * 100)|round|int }}%</span>
+        </div>
+        <div class="mt-2 h-2 w-full rounded-full bg-white/70 overflow-hidden">
+          <div class="h-full {{ bar }}" style="width: {{ (assessment.probability * 100)|round|int }}%"></div>
+        </div>
+      </div>
+    {% endif %}
+    <p class="mt-4 text-sm {{ text }}" {% if assessment.out_of_range_reason %}hidden{% endif %}>
+      {# State the accuracy alongside the number rather than in a footnote. A
+         probability shown without its error bar invites more trust than it has
+         earned. #}
+      {# holdout_rows is the *test* split (123), not the training-set size.
+         Printing it here claimed the model saw a fifth of the data it actually
+         saw — exactly the kind of inflated-sounding-but-wrong number this
+         project exists to avoid. Both figures are now stated for what they
+         are. #}
+      This comes from a model trained on
+      {{ assessment.model_training_rows }} historical applications, scoring a
+      holdout ROC-AUC of
+      {{ '%.2f'|format(assessment.model_metrics.get('roc_auc', 0)) }}
+      on {{ assessment.model_metrics.get('holdout_rows', 0) }} held-back cases.
+      <a href="{{ url_for('pages.how_it_works') }}" class="underline">See how accurate that is</a>.
+    </p>
+  </section>
+
+  {# --- Affordability --------------------------------------------------- #}
+  <section class="bg-white rounded-lg border border-slate-200 p-6">
+    <h2 class="font-semibold text-slate-900">What this loan would cost you</h2>
+    <p class="mt-1 text-xs text-slate-500">
+      Calculated at a reference rate of
+      {{ '%.2f'|format(assessment.affordability.annual_interest_rate * 100) }}% per year.
+      Your actual offer will differ.
+    </p>
+    <dl class="mt-4 grid sm:grid-cols-3 gap-4 text-sm">
+      <div class="rounded-md bg-slate-50 p-4">
+        <dt class="text-slate-500">Monthly instalment</dt>
+        <dd class="mt-1 text-xl font-semibold text-slate-900">
+          {{ '{:,.0f}'.format(assessment.affordability.monthly_instalment) }}
+        </dd>
+      </div>
+      <div class="rounded-md bg-slate-50 p-4">
+        <dt class="text-slate-500">Share of your income</dt>
+        <dd class="mt-1 text-xl font-semibold text-slate-900">
+          {# With no declared income the ratio is undefined, not 0%. Showing
+             "0%" beside a real instalment read as "this is free". #}
+          {% if assessment.affordability.total_income > 0 %}
+            {{ (assessment.affordability.emi_to_income * 100)|round|int }}%
+          {% else %}
+            <span class="text-base text-slate-500">no income declared</span>
+          {% endif %}
+        </dd>
+      </div>
+      <div class="rounded-md bg-slate-50 p-4">
+        <dt class="text-slate-500">Total interest</dt>
+        <dd class="mt-1 text-xl font-semibold text-slate-900">
+          {{ '{:,.0f}'.format(assessment.affordability.total_interest) }}
+        </dd>
+      </div>
+    </dl>
+    <p class="mt-4 text-sm text-slate-600">
+      At your income, an instalment staying within
+      {{ (config.max_emi_to_income * 100)|round|int }}% of household earnings
+      supports a loan of about
+      <strong>{{ '{:,.0f}'.format(assessment.affordability.max_affordable_loan) }}</strong>.
+    </p>
+  </section>
+
+  {# --- Why -------------------------------------------------------------- #}
+  <section class="bg-white rounded-lg border border-slate-200 p-6">
+    <h2 class="font-semibold text-slate-900">Why the estimate landed here</h2>
+    {% if assessment.factors %}
+      <ul class="mt-4 space-y-3">
+        {% for factor in assessment.factors %}
+          <li class="flex gap-3">
+            <span class="mt-1 shrink-0 w-2 h-2 rounded-full
+              {{ 'bg-emerald-500' if factor.direction == 'helps' else 'bg-rose-500' }}"></span>
+            <div>
+              <p class="text-sm font-medium text-slate-900">
+                {{ factor.label }}
+                <span class="{{ 'text-emerald-700' if factor.direction == 'helps' else 'text-rose-700' }}">
+                  ({{ '+' if factor.impact > 0 else '' }}{{ (factor.impact * 100)|round(1) }} pts)
+                </span>
+              </p>
+              <p class="text-sm text-slate-600">{{ factor.detail }}</p>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+      <p class="mt-4 text-xs text-slate-500">
+        Each figure is measured by re-scoring your application with that one input
+        set to a typical value. Because factors are varied one at a time, they do
+        not capture how two inputs interact, and they will not sum exactly to your
+        total.
+      </p>
+    {% else %}
+      <p class="mt-3 text-sm text-slate-600">
+        No single input stands out — your application sits close to a typical one
+        on every factor the model uses.
+      </p>
+    {% endif %}
+  </section>
+
+  {# --- Rules ------------------------------------------------------------ #}
+  <section class="bg-white rounded-lg border border-slate-200 p-6">
+    <h2 class="font-semibold text-slate-900">Affordability and credit checks</h2>
+    <p class="mt-1 text-xs text-slate-500">
+      Deterministic rules with published thresholds — separate from the model,
+      and reproducible by hand.
+    </p>
+    <ul class="mt-4 space-y-3">
+      {% for rule in assessment.rules %}
+        <li class="flex gap-3">
+          <span class="mt-0.5 shrink-0 text-sm font-bold
+            {% if rule.severity == 'pass' %}text-emerald-600
+            {% elif rule.severity == 'warn' %}text-amber-600
+            {% else %}text-rose-600{% endif %}">
+            {% if rule.severity == 'pass' %}✓{% elif rule.severity == 'warn' %}!{% else %}✕{% endif %}
+          </span>
+          <div>
+            <p class="text-sm font-medium text-slate-900">{{ rule.title }}</p>
+            <p class="text-sm text-slate-600">{{ rule.detail }}</p>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  {# --- Guidance ---------------------------------------------------------- #}
+  {% if assessment.suggestions %}
+    <section class="bg-white rounded-lg border border-indigo-200 p-6">
+      <h2 class="font-semibold text-slate-900">What would improve your chances</h2>
+      <p class="mt-1 text-xs text-slate-500">
+        Each option was re-scored through the same model. Percentages are the
+        estimate for that changed application.
+      </p>
+      <ul class="mt-4 space-y-4">
+        {% for suggestion in assessment.suggestions %}
+          <li class="rounded-md border border-slate-200 p-4">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <p class="text-sm font-semibold text-slate-900">{{ suggestion.action }}</p>
+                <p class="mt-1 text-sm text-slate-600">{{ suggestion.detail }}</p>
+              </div>
+              <div class="text-right shrink-0">
+                <p class="text-lg font-bold text-indigo-600">
+                  {{ (suggestion.projected_probability * 100)|round|int }}%
+                </p>
+                <p class="text-xs text-emerald-700">
+                  +{{ (suggestion.delta * 100)|round(1) }} pts
+                </p>
+              </div>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+      <a href="{{ url_for('pages.apply_form') }}"
+         class="inline-block mt-4 text-sm text-indigo-600 underline">
+        Try a different scenario
+      </a>
+    </section>
+  {% endif %}
+
+  {# --- Next steps -------------------------------------------------------- #}
+  <section class="flex flex-wrap items-center gap-3">
+    <a href="{{ url_for('pages.apply_form') }}{% if saved_id %}?from={{ saved_id }}{% endif %}"
+       class="px-5 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">
+      Adjust and re-run
+    </a>
+    {% if saved_id %}
+      <a href="{{ url_for('pages.dashboard') }}"
+         class="px-5 py-2.5 rounded-lg border border-slate-300 bg-white text-sm font-medium hover:bg-slate-50">
+        Saved to your applications
+      </a>
+    {% else %}
+      <span class="text-sm text-slate-600">
+        <a href="{{ url_for('pages.signup') }}" class="text-indigo-600 underline">Create an account</a>
+        to save this and compare scenarios later.
+      </span>
+    {% endif %}
+  </section>
+
+</div>
+{% endblock %}

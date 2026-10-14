@@ -6,20 +6,24 @@ __pycache__/
 venv/
 loan_env/
 
-# Secrets — never commit
-.env
-
-# Runtime data
+# Local state — never commit a database with real user data
 *.db
+*.db-wal
+*.db-shm
 
-# Trained model artifacts: rebuilt from data/train.csv via
-# `python models/model_trainer.py`. Kept out of git because sklearn
-# pickles are not portable across library versions.
-models/*.pkl
+# Secrets
+.env
+.env.*
+!.env.example
 
-# Test / coverage output
+# Test / tooling output
 .pytest_cache/
 .coverage
 htmlcov/
-*.db-wal
-*.db-shm
+.ruff_cache/
+
+# The trained bundle is committed on purpose (see docs/DEPLOYMENT.md), but
+# nothing else in models/ is.
+models/*
+!models/loan_model.joblib
+!models/metrics.json

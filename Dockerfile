@@ -1,57 +1,77 @@
-# Deployment image for platforms with a real filesystem (Railway, Render,
-# Fly.io, any VPS). This app keeps state in SQLite, so it needs a writable
-# persistent volume — see README "Deployment".
+# Production image. This is the recommended way to run the app — see
+# docs/DEPLOYMENT.md for why a container beats a serverless target for a
+# stateful application.
 #
-# The model artefacts are trained during the build rather than committed:
+# The model is trained during the build rather than copied from the repository.
 # scikit-learn pickles are not portable across library versions, so building
-# them against the exact pinned versions in this image is what keeps them
-# loadable.
+# the artifact against the exact pins installed in *this* image is what
+# guarantees it stays loadable. The committed bundle in models/ still serves
+# local development and the CI contract check; the image simply does not depend
+# on it. loanapp/ml/registry.py refuses a bundle whose recorded scikit-learn or
+# numpy version does not match the running one, so a mismatch here fails loudly
+# at startup instead of at the first request.
 
-FROM python:3.11-slim AS builder
+FROM python:3.13-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
 
 WORKDIR /build
 
-RUN pip install --no-cache-dir --upgrade pip
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
-# Train against the installed versions, so the pickles match the runtime.
-COPY models/ ./models/
+# Train against the versions just installed, so the pickle matches the runtime.
+COPY loanapp/ ./loanapp/
 COPY data/train.csv ./data/train.csv
-ENV PYTHONPATH=/install/lib/python3.11/site-packages
-RUN python models/model_trainer.py
+# The site-packages path is derived rather than hardcoded: writing
+# python3.13/site-packages couples this line to the base image tag above, and
+# bumping that tag would break the build in a way that looks unrelated.
+RUN PYTHONPATH="$(ls -d /install/lib/python*/site-packages)" \
+    FLASK_ENV=development \
+    python -m loanapp.ml.train --model-dir /build/models --no-docs
 
 
-FROM python:3.11-slim
+FROM python:3.13-slim
 
-# Non-root: nothing here needs privileges.
-RUN useradd --create-home --uid 10001 appuser
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
 COPY --from=builder /install /usr/local
-COPY --from=builder /build/models/*.pkl ./models/
-COPY app.py .
+COPY --from=builder /build/models/ ./models/
+
+COPY loanapp/ ./loanapp/
 COPY templates/ ./templates/
 COPY static/ ./static/
-COPY models/model_trainer.py ./models/
+COPY data/ ./data/
+COPY app.py ./
 
-# SQLite lives on a mounted volume; without one, state is lost on redeploy.
-RUN mkdir -p /data && chown appuser:appuser /data
-VOLUME ["/data"]
-ENV DATABASE_PATH=/data/loan_prediction.db \
-    MODEL_PATH=/app/models \
-    FLASK_ENV=production \
-    PYTHONUNBUFFERED=1
-
+# Run unprivileged. /data is the mount point for the SQLite volume, so the
+# database survives a container restart; without a volume, state is lost on
+# redeploy.
+RUN useradd --create-home --uid 10001 --shell /usr/sbin/nologin appuser \
+    && mkdir -p /data \
+    && chown -R appuser:appuser /app /data
 USER appuser
+
+ENV FLASK_ENV=production \
+    DATABASE_PATH=/data/loanwise.db \
+    MODEL_DIR=/app/models \
+    PORT=8000
+
 EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import urllib.request,sys; \
-sys.exit(0 if urllib.request.urlopen('http://localhost:8000/api/health').status==200 else 1)"
+# The health endpoint returns 200 even with no model loaded — the process is
+# alive, everything except assessment works, and restarting will not conjure a
+# model. Deliberate; see loanapp/blueprints/api.py.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status==200 else 1)"
 
-# SECRET_KEY and ADMIN_PASSWORD must be supplied at runtime; the app refuses
-# to start without SECRET_KEY outside development.
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "2", \
-     "--access-logfile", "-", "app:app"]
+# Two workers: the model is loaded per worker, so memory scales with this.
+# Multi-worker startup is safe — loanapp/db.py sets the WAL journal mode once
+# at init rather than per connection, which is what made concurrent workers
+# collide on the exclusive lock.
+CMD ["sh", "-c", "gunicorn --workers 2 --threads 4 --timeout 60 --bind 0.0.0.0:${PORT} app:app"]

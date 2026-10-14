@@ -1,64 +1,77 @@
+{# Base layout. Tailwind is loaded from a CDN, which keeps the build toolchain
+   at zero but means the UI degrades to unstyled HTML offline. That trade is
+   noted in docs/ARCHITECTURE.md; swapping to a built stylesheet is a roadmap
+   item, not a hidden flaw. #}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="h-full">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Loan Eligibility Prediction System{% endblock %}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#3B82F6',
-                        secondary: '#1E40AF',
-                        success: '#10B981',
-                        warning: '#F59E0B',
-                        danger: '#EF4444'
-                    }
-                }
-            }
-        }
-    </script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}LoanWise — loan eligibility guidance{% endblock %}</title>
+  <meta name="description" content="Estimate your loan eligibility, understand why, and see what would improve your chances.">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    [x-cloak] { display: none; }
+    .prose-tight p { margin-bottom: .5rem; }
+  </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <!-- Navigation -->
-    <nav class="bg-white shadow-lg">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <h1 class="text-xl font-bold text-primary">
-                        <i class="fas fa-chart-line mr-2"></i>
-                        Loan Eligibility System
-                    </h1>
-                </div>
-                <div class="flex items-center space-x-4">
-                    {% block nav_actions %}{% endblock %}
-                </div>
-            </div>
-        </div>
-    </nav>
+<body class="h-full bg-slate-50 text-slate-800 antialiased flex flex-col">
 
-    <!-- Flash Messages -->
-    <div id="flash-messages" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-4">
-        <!-- Dynamic flash messages will be inserted here -->
+<header class="bg-white border-b border-slate-200">
+  <nav class="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+    <a href="{{ url_for('pages.home') }}" class="font-semibold text-lg text-slate-900">
+      Loan<span class="text-indigo-600">Wise</span>
+    </a>
+    <div class="flex items-center gap-1 text-sm">
+      <a href="{{ url_for('pages.apply_form') }}" class="px-3 py-2 rounded-md hover:bg-slate-100">Check eligibility</a>
+      <a href="{{ url_for('pages.how_it_works') }}" class="px-3 py-2 rounded-md hover:bg-slate-100">How it works</a>
+      {% if current_user %}
+        <a href="{{ url_for('pages.dashboard') }}" class="px-3 py-2 rounded-md hover:bg-slate-100">My applications</a>
+        {% if current_user.is_admin %}
+          <a href="{{ url_for('admin.dashboard') }}" class="px-3 py-2 rounded-md hover:bg-slate-100">Admin</a>
+        {% endif %}
+        <form method="post" action="{{ url_for('auth.logout') }}" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="px-3 py-2 rounded-md hover:bg-slate-100">Sign out</button>
+        </form>
+      {% else %}
+        <a href="{{ url_for('pages.login') }}" class="px-3 py-2 rounded-md hover:bg-slate-100">Sign in</a>
+        <a href="{{ url_for('pages.signup') }}" class="px-3 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700">Create account</a>
+      {% endif %}
     </div>
+  </nav>
+</header>
 
-    <!-- Main Content -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {% block content %}{% endblock %}
-    </main>
+<main class="flex-1 max-w-5xl w-full mx-auto px-4 py-8">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div class="mb-6 space-y-2">
+        {% for category, message in messages %}
+          <div class="rounded-md px-4 py-3 text-sm border
+            {% if category == 'error' %}bg-rose-50 border-rose-200 text-rose-800
+            {% elif category == 'success' %}bg-emerald-50 border-emerald-200 text-emerald-800
+            {% else %}bg-sky-50 border-sky-200 text-sky-800{% endif %}">
+            {{ message }}
+          </div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
 
-    <!-- Footer -->
-    <footer class="bg-gray-800 text-white py-8 mt-16">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-            <p>&copy; 2025 Loan Eligibility Prediction System. Built with modern web technologies.</p>
-        </div>
-    </footer>
+  {% block content %}{% endblock %}
+</main>
 
-    <!-- Common JavaScript -->
-    <script src="{{ url_for('static', filename='js/common.js') }}"></script>
-    {% block scripts %}{% endblock %}
+<footer class="bg-white border-t border-slate-200 mt-8">
+  <div class="max-w-5xl mx-auto px-4 py-6 text-xs text-slate-500 space-y-2">
+    <p class="font-medium text-slate-700">Not a loan offer.</p>
+    <p>{{ disclaimer }}</p>
+    <p class="pt-2">
+      Open source · v{{ app_version }} ·
+      <a class="underline hover:text-slate-700" href="{{ url_for('pages.how_it_works') }}">model details and limitations</a>
+    </p>
+  </div>
+</footer>
+
+{% block scripts %}{% endblock %}
 </body>
 </html>

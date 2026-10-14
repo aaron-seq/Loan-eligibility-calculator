@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}My applications — LoanWise{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between gap-4">
+  <div>
+    <h1 class="text-2xl font-bold text-slate-900">My applications</h1>
+    <p class="mt-1 text-sm text-slate-600">
+      Every scenario you have run, newest first. Re-open one to adjust a single
+      field and see what changes.
+    </p>
+  </div>
+  <a href="{{ url_for('pages.apply_form') }}"
+     class="shrink-0 px-4 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">
+    New assessment
+  </a>
+</div>
+
+{% if applications %}
+  <div class="mt-6 overflow-x-auto bg-white rounded-lg border border-slate-200">
+    <table class="min-w-full text-sm">
+      <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wide">
+        <tr>
+          <th class="text-left px-4 py-3 font-medium">Scenario</th>
+          <th class="text-right px-4 py-3 font-medium">Loan</th>
+          <th class="text-right px-4 py-3 font-medium">Estimate</th>
+          <th class="text-left px-4 py-3 font-medium">Outcome</th>
+          <th class="text-left px-4 py-3 font-medium">Run</th>
+          <th class="px-4 py-3"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        {% for record in applications %}
+          <tr class="hover:bg-slate-50">
+            <td class="px-4 py-3 text-slate-900">
+              {{ record.label or 'Untitled scenario' }}
+            </td>
+            <td class="px-4 py-3 text-right tabular-nums">
+              {{ '{:,.0f}'.format(record.payload.loan_amount) }}
+            </td>
+            <td class="px-4 py-3 text-right tabular-nums font-medium">
+              {{ (record.probability * 100)|round|int }}%
+            </td>
+            <td class="px-4 py-3">
+              <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium
+                {% if record.band == 'likely' %}bg-emerald-100 text-emerald-800
+                {% elif record.band == 'borderline' %}bg-amber-100 text-amber-800
+                {% else %}bg-rose-100 text-rose-800{% endif %}">
+                {{ record.band }}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-slate-500">{{ record.created_at[:10] }}</td>
+            <td class="px-4 py-3 text-right whitespace-nowrap">
+              <a href="{{ url_for('pages.view_application', application_id=record.id) }}"
+                 class="text-indigo-600 underline">View</a>
+              <a href="{{ url_for('pages.apply_form', **{'from': record.id}) }}"
+                 class="ml-3 text-indigo-600 underline">Re-run</a>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="mt-3 text-xs text-slate-500">
+    Estimates from different model versions are not directly comparable. The
+    version used is recorded with each application.
+  </p>
+{% else %}
+  <div class="mt-6 bg-white rounded-lg border border-slate-200 p-10 text-center">
+    <p class="text-slate-600">You have not run an assessment yet.</p>
+    <a href="{{ url_for('pages.apply_form') }}"
+       class="inline-block mt-4 px-5 py-2.5 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700">
+      Check your eligibility
+    </a>
+  </div>
+{% endif %}
+{% endblock %}

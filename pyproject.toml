@@ -1,0 +1,91 @@
+[project]
+name = "loanwise"
+version = "2.1.0"
+description = "Explainable loan eligibility guidance with calibrated estimates and honest limitations"
+readme = "README.md"
+license = { file = "LICENSE" }
+# 3.11 is the floor, and it is set by the dependencies rather than by taste:
+# numpy 2.4, pandas 3.0 and scikit-learn 1.9 all declare requires-python >=3.11.
+requires-python = ">=3.11"
+classifiers = [
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Framework :: Flask",
+  "License :: OSI Approved :: MIT License",
+]
+
+# Dependencies live in requirements.txt rather than here. They are pinned
+# exactly because the model bundle is a pickle whose scikit-learn and numpy
+# versions are part of its contract (see loanapp/ml/registry.py), and a
+# requirements file is what the Dockerfile and CI already consume.
+
+[tool.ruff]
+# Pinned explicitly so a ruff release cannot silently change what CI enforces.
+# Ruff's default rule set grows between versions; discovering that as a red
+# build on an unrelated pull request is a bad trade.
+target-version = "py311"
+line-length = 90
+extend-exclude = ["notebooks", ".venv"]
+
+[tool.ruff.lint]
+select = [
+  "E",      # pycodestyle errors
+  "F",      # pyflakes
+  "I",      # import sorting
+  "UP",     # pyupgrade — keeps syntax current with the floor above
+  "B",      # bugbear — likely bugs
+  "C4",     # comprehensions
+  "SIM",    # simplification
+  "ISC",    # implicit string concatenation
+  "RUF",    # ruff's own rules
+  "PL",     # pylint subset
+  "S",      # bandit subset, as a fast pre-check before the real scan
+]
+ignore = [
+  "E501",    # line length is handled by the formatter
+  "PLR0913", # argument count: the assessment orchestrator legitimately takes several
+  "PLR2004", # magic values: thresholds in tests read better as literals
+  "S101",    # assert: that is what tests are made of
+  # Deferred imports inside create_app are required, not sloppy: blueprints
+  # import from the package, so hoisting them to module level is a circular
+  # import. This is the documented Flask app-factory pattern.
+  "PLC0415",
+  # Flags EN DASH and similar as ambiguous. Aimed at identifiers; every hit
+  # here is deliberate typography inside prose shown to users.
+  "RUF001",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests reach into private helpers deliberately, conftest must adjust sys.path
+# before importing the package under test, and fixture "passwords" are fixtures.
+"tests/*" = ["SLF001", "E402", "S105", "S106"]
+"loanapp/ml/train.py" = ["T201"] # the trainer is a CLI; printing is its interface
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q --strict-markers --strict-config"
+markers = [
+  "requires_model: needs a trained bundle in models/ (skipped if absent)",
+  "slow: spawns real subprocesses; the only way to catch cross-process races",
+]
+filterwarnings = [
+  "error::DeprecationWarning:loanapp.*",
+  # scikit-learn warns on cross-version unpickling. We turn that situation into
+  # a hard ModelContractError ourselves, and tests exercise it on purpose.
+  "ignore::sklearn.exceptions.InconsistentVersionWarning",
+]
+
+[tool.coverage.run]
+source = ["loanapp"]
+branch = true
+
+[tool.coverage.report]
+precision = 1
+show_missing = true
+exclude_also = [
+  "if TYPE_CHECKING:",
+  "raise NotImplementedError",
+  "if __name__ == .__main__.:",
+]

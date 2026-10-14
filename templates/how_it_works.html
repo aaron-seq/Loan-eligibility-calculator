@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}How it works — LoanWise{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-8">
+
+  <div>
+    <h1 class="text-2xl font-bold text-slate-900">How this works, and what it can't do</h1>
+    <p class="mt-2 text-slate-600">
+      A tool that tells you something about your finances owes you a plain
+      account of where its answer comes from.
+    </p>
+  </div>
+
+  {% if bundle %}
+    <section class="bg-white rounded-lg border border-slate-200 p-6">
+      <h2 class="font-semibold text-slate-900">The model currently running</h2>
+      <dl class="mt-4 space-y-2 text-sm">
+        <div class="flex justify-between border-b border-slate-100 py-1">
+          <dt class="text-slate-500">Version</dt>
+          <dd class="font-mono text-slate-900">{{ bundle.version }}</dd>
+        </div>
+        <div class="flex justify-between border-b border-slate-100 py-1">
+          <dt class="text-slate-500">Trained</dt>
+          <dd class="text-slate-900">{{ bundle.trained_at[:10] }}</dd>
+        </div>
+        <div class="flex justify-between border-b border-slate-100 py-1">
+          <dt class="text-slate-500">Probabilities calibrated</dt>
+          <dd class="text-slate-900">{{ 'Yes' if bundle.is_calibrated else 'No' }}</dd>
+        </div>
+        {% for key, value in bundle.metrics.items() %}
+          <div class="flex justify-between border-b border-slate-100 py-1">
+            <dt class="text-slate-500">{{ key.replace('_', ' ')|capitalize }}</dt>
+            <dd class="text-slate-900 tabular-nums">{{ value }}</dd>
+          </div>
+        {% endfor %}
+      </dl>
+      <p class="mt-4 text-sm text-slate-600">
+        ROC-AUC measures how well the model ranks approvable applications above
+        non-approvable ones; 0.5 would be a coin flip. The Brier score measures
+        whether the probabilities themselves are honest — lower is better, and
+        0.25 is what you would get by always guessing 50%.
+      </p>
+    </section>
+  {% else %}
+    <section class="rounded-lg border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900">
+      No model is loaded on this deployment, so eligibility checks are unavailable.
+    </section>
+  {% endif %}
+
+  <section class="bg-white rounded-lg border border-slate-200 p-6 space-y-4 text-sm text-slate-600">
+    <div>
+      <h2 class="font-semibold text-slate-900">Where the data comes from</h2>
+      <p class="mt-2">
+        The model is trained on a public dataset of <strong>614 historical loan
+        applications</strong>. That is a small dataset. It is enough to
+        demonstrate a real decisioning pipeline and to give you a directionally
+        useful signal; it is not enough to validate a model for actual credit
+        underwriting, and we do not claim otherwise.
+      </p>
+      <p class="mt-2">
+        The data also carries whatever bias the original approval decisions
+        contained. A model fitted to past decisions reproduces past patterns,
+        including unfair ones.
+      </p>
+    </div>
+
+    <div>
+      <h2 class="font-semibold text-slate-900">What we deliberately don't use</h2>
+      <p class="mt-2">
+        <strong>Gender and marital status.</strong> Using them as a basis for a
+        credit decision is prohibited under fair-lending rules such as ECOA /
+        Regulation B. We do not collect them and the model never sees them. We
+        measured the cost of leaving them out: on this dataset, none.
+      </p>
+      <p class="mt-2">
+        <strong>Your credit score, as a model input.</strong> The training data
+        contains no credit bureau scores, so a model trained on it cannot have
+        learned anything from one. An earlier version of this project
+        manufactured random scores during training while presenting the field as
+        real. Your score is now used only in the affordability and credit rules,
+        where the thresholds are published.
+      </p>
+    </div>
+
+    <div>
+      <h2 class="font-semibold text-slate-900">How the explanations are computed</h2>
+      <p class="mt-2">
+        For each input, we re-score your application with that one value replaced
+        by a typical value from the training data. The change in the estimate is
+        that input's contribution. It is exact and reproducible, but it varies one
+        factor at a time — so it cannot capture cases where two inputs only matter
+        together, and the individual contributions will not sum precisely to your
+        total.
+      </p>
+    </div>
+
+    <div>
+      <h2 class="font-semibold text-slate-900">The affordability rules</h2>
+      <p class="mt-2">
+        Separate from the model, and just arithmetic. The monthly instalment uses
+        the standard amortisation formula at a reference rate of
+        {{ '%.2f'|format(config.annual_interest_rate * 100) }}% per year. We flag
+        an instalment above {{ (config.max_emi_to_income * 100)|round|int }}% of
+        household income, since that is the ceiling most lenders apply. Credit
+        scores below {{ config.cibil_caution_threshold }} are flagged; above
+        {{ config.cibil_strong_threshold }} is treated as strong.
+      </p>
+    </div>
+
+    <div>
+      <h2 class="font-semibold text-slate-900">What this is not</h2>
+      <p class="mt-2">
+        Not a loan offer. Not a credit decision. No lender receives your inputs,
+        and no lender is bound by the result. A real assessment involves verified
+        income, documents and a full bureau report — none of which this tool sees.
+      </p>
+    </div>
+  </section>
+
+  <section class="bg-white rounded-lg border border-slate-200 p-6 text-sm">
+    <h2 class="font-semibold text-slate-900">For engineers and analysts</h2>
+    <p class="mt-2 text-slate-600">
+      The full model card — holdout metrics, confusion matrix, calibration table
+      and fairness audit — is generated by the training run and lives in
+      <code class="font-mono text-xs">docs/MODEL.md</code>. The live model's
+      metadata is also served at
+      <code class="font-mono text-xs">GET /api/model-card</code>.
+    </p>
+  </section>
+</div>
+{% endblock %}

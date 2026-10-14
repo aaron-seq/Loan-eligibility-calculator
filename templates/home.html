@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block content %}
+
+<section class="text-center py-10">
+  <h1 class="text-4xl font-bold text-slate-900 tracking-tight">
+    Will your loan application be approved?
+  </h1>
+  <p class="mt-4 text-lg text-slate-600 max-w-2xl mx-auto">
+    Get an honest estimate in under a minute — plus the reasons behind it and
+    what would actually improve your chances. No account needed.
+  </p>
+  <div class="mt-8 flex items-center justify-center gap-3">
+    <a href="{{ url_for('pages.apply_form') }}"
+       class="px-6 py-3 rounded-lg bg-indigo-600 text-white font-medium hover:bg-indigo-700">
+      Check my eligibility
+    </a>
+    <a href="{{ url_for('pages.how_it_works') }}"
+       class="px-6 py-3 rounded-lg border border-slate-300 bg-white font-medium hover:bg-slate-50">
+      How it works
+    </a>
+  </div>
+</section>
+
+{% if model_status != 'ready' %}
+  {# Say so on the front page rather than letting someone fill in a form that
+     cannot be answered. #}
+  <div class="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+    <strong>Assessment is offline on this deployment.</strong>
+    No trained model is loaded, so eligibility checks are unavailable.
+    Maintainers: run <code class="font-mono">python -m loanapp.ml.train</code> and redeploy.
+  </div>
+{% endif %}
+
+<section class="grid md:grid-cols-3 gap-4 mt-10">
+  <div class="bg-white rounded-lg border border-slate-200 p-5">
+    <h2 class="font-semibold text-slate-900">A calibrated estimate</h2>
+    <p class="mt-2 text-sm text-slate-600">
+      You get a probability, not a verdict — and we publish how well that
+      probability tracks reality, so “72%” means something.
+    </p>
+  </div>
+  <div class="bg-white rounded-lg border border-slate-200 p-5">
+    <h2 class="font-semibold text-slate-900">Reasons, not a black box</h2>
+    <p class="mt-2 text-sm text-slate-600">
+      Every result breaks down which parts of your application pushed the
+      estimate up or down, and by roughly how much.
+    </p>
+  </div>
+  <div class="bg-white rounded-lg border border-slate-200 p-5">
+    <h2 class="font-semibold text-slate-900">What to change</h2>
+    <p class="mt-2 text-sm text-slate-600">
+      We re-score realistic variations — borrow less, stretch the term, add a
+      co-applicant — and show which ones actually move the number.
+    </p>
+  </div>
+</section>
+
+<section class="mt-10 bg-white rounded-lg border border-slate-200 p-6">
+  <h2 class="font-semibold text-slate-900">What this is honest about</h2>
+  <ul class="mt-3 space-y-2 text-sm text-slate-600 list-disc list-inside">
+    <li>The model is trained on a <strong>small public dataset of 614 applications</strong>. It is a demonstration, not an underwriting system.</li>
+    <li>It does not use your gender or marital status. Those are prohibited grounds for a credit decision, and we measured that leaving them out costs nothing.</li>
+    <li>Your credit bureau score is used in published, deterministic rules — not fed to the model, because the training data contains no bureau scores.</li>
+    <li>No lender sees this, and no lender is bound by it.</li>
+  </ul>
+  <a href="{{ url_for('pages.how_it_works') }}" class="inline-block mt-4 text-sm text-indigo-600 underline">
+    Read the full model card
+  </a>
+</section>
+
+{% endblock %}

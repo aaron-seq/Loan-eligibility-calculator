@@ -1,34 +1,141 @@
 {% extends "base.html" %}
+{% block title %}Admin — LoanWise{% endblock %}
 {% block content %}
-<div class="max-w-4xl mx-auto p-6">
-  <h1 class="text-2xl font-bold mb-4">Admin Dashboard</h1>
-  {% if predictions and predictions|length %}
-  <div class="overflow-x-auto">
-    <table class="min-w-full divide-y divide-gray-200">
-      <thead class="bg-gray-50">
-        <tr>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Decision</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Confidence</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
-        </tr>
-      </thead>
-      <tbody class="bg-white divide-y divide-gray-200">
-        {% for p in predictions %}
-        <tr>
-          <td class="px-4 py-2">{{ p['full_name'] }}</td>
-          <td class="px-4 py-2">{{ p['email'] }}</td>
-          <td class="px-4 py-2">{{ p['prediction_result'] }}</td>
-          <td class="px-4 py-2">{{ '%.2f'|format(p['confidence_score']) }}%</td>
-          <td class="px-4 py-2">{{ p['created_at'] }}</td>
-        </tr>
+<h1 class="text-2xl font-bold text-slate-900">Operations overview</h1>
+<p class="mt-1 text-sm text-slate-600">
+  Aggregate behaviour of the deployment. Personal data is shown only where an
+  operator genuinely needs it to investigate a specific assessment.
+</p>
+
+<section class="mt-6 grid sm:grid-cols-4 gap-4">
+  {% for label, value in [
+      ('Assessments', stats.total),
+      ('Applicants', stats.applicants),
+      ('Registered users', user_count),
+      ('Mean estimate', (stats.mean_probability * 100)|round|int ~ '%')
+  ] %}
+    <div class="bg-white rounded-lg border border-slate-200 p-4">
+      <p class="text-xs uppercase tracking-wide text-slate-500">{{ label }}</p>
+      <p class="mt-1 text-2xl font-bold text-slate-900 tabular-nums">{{ value }}</p>
+    </div>
+  {% endfor %}
+</section>
+
+<section class="mt-6 grid md:grid-cols-2 gap-4">
+  <div class="bg-white rounded-lg border border-slate-200 p-5">
+    <h2 class="font-semibold text-slate-900">Outcome mix</h2>
+    {% if stats.total %}
+      <ul class="mt-4 space-y-3">
+        {% for band in ['likely', 'borderline', 'unlikely'] %}
+          {% set count = stats.bands.get(band, 0) %}
+          {% set pct = (count / stats.total * 100)|round|int %}
+          <li>
+            <div class="flex justify-between text-sm">
+              <span class="text-slate-700 capitalize">{{ band }}</span>
+              <span class="tabular-nums text-slate-500">{{ count }} ({{ pct }}%)</span>
+            </div>
+            <div class="mt-1 h-2 rounded-full bg-slate-100 overflow-hidden">
+              <div class="h-full
+                {% if band == 'likely' %}bg-emerald-500
+                {% elif band == 'borderline' %}bg-amber-500
+                {% else %}bg-rose-500{% endif %}"
+                style="width: {{ pct }}%"></div>
+            </div>
+          </li>
         {% endfor %}
-      </tbody>
-    </table>
+      </ul>
+      <p class="mt-4 text-xs text-slate-500">
+        A sharp shift in this mix without a model change is worth investigating —
+        it usually means the input population changed.
+      </p>
+    {% else %}
+      <p class="mt-3 text-sm text-slate-600">No assessments recorded yet.</p>
+    {% endif %}
   </div>
+
+  <div class="bg-white rounded-lg border border-slate-200 p-5">
+    <h2 class="font-semibold text-slate-900">Serving model</h2>
+    {% if assessor %}
+      <dl class="mt-4 space-y-2 text-sm">
+        <div class="flex justify-between border-b border-slate-100 py-1">
+          <dt class="text-slate-500">Status</dt>
+          <dd class="text-emerald-700 font-medium">{{ model_status }}</dd>
+        </div>
+        <div class="flex justify-between border-b border-slate-100 py-1">
+          <dt class="text-slate-500">Version</dt>
+          <dd class="font-mono text-xs text-slate-900">{{ assessor.bundle.version }}</dd>
+        </div>
+        <div class="flex justify-between border-b border-slate-100 py-1">
+          <dt class="text-slate-500">Calibrated</dt>
+          <dd class="text-slate-900">{{ 'yes' if assessor.bundle.is_calibrated else 'no' }}</dd>
+        </div>
+        {% for key, value in assessor.bundle.metrics.items() %}
+          <div class="flex justify-between border-b border-slate-100 py-1">
+            <dt class="text-slate-500">{{ key.replace('_', ' ') }}</dt>
+            <dd class="text-slate-900 tabular-nums">{{ value }}</dd>
+          </div>
+        {% endfor %}
+      </dl>
+    {% else %}
+      <p class="mt-3 text-sm text-rose-700">
+        No model loaded — status <code class="font-mono">{{ model_status }}</code>.
+      </p>
+    {% endif %}
+
+    {% if stats.model_versions|length > 1 %}
+      <div class="mt-4 pt-4 border-t border-slate-100">
+        <p class="text-xs font-medium text-slate-700">Assessments by model version</p>
+        <ul class="mt-2 space-y-1 text-xs text-slate-600">
+          {% for entry in stats.model_versions %}
+            <li class="flex justify-between">
+              <span class="font-mono truncate">{{ entry.version }}</span>
+              <span class="tabular-nums shrink-0 ml-2">{{ entry.count }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="mt-6 bg-white rounded-lg border border-slate-200">
+  <h2 class="font-semibold text-slate-900 px-5 pt-5">Recent assessments</h2>
+  {% if recent %}
+    <div class="mt-3 overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead class="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th class="text-left px-5 py-2 font-medium">When</th>
+            <th class="text-left px-5 py-2 font-medium">Applicant</th>
+            <th class="text-left px-5 py-2 font-medium">Scenario</th>
+            <th class="text-right px-5 py-2 font-medium">Estimate</th>
+            <th class="text-left px-5 py-2 font-medium">Band</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          {% for row in recent %}
+            <tr>
+              <td class="px-5 py-2 text-slate-500 whitespace-nowrap">{{ row.created_at[:16]|replace('T', ' ') }}</td>
+              <td class="px-5 py-2 text-slate-900">{{ row.full_name or row.user_id }}</td>
+              <td class="px-5 py-2 text-slate-600">{{ row.label or '—' }}</td>
+              <td class="px-5 py-2 text-right tabular-nums">{{ (row.probability * 100)|round|int }}%</td>
+              <td class="px-5 py-2">
+                <span class="inline-block px-2 py-0.5 rounded-full text-xs
+                  {% if row.band == 'likely' %}bg-emerald-100 text-emerald-800
+                  {% elif row.band == 'borderline' %}bg-amber-100 text-amber-800
+                  {% else %}bg-rose-100 text-rose-800{% endif %}">{{ row.band }}</span>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="px-5 py-3 text-xs text-slate-500">
+      Showing the 50 most recent. Machine-readable aggregates:
+      <code class="font-mono">GET /admin/stats</code>.
+    </p>
   {% else %}
-  <p>No predictions yet.</p>
+    <p class="px-5 py-5 text-sm text-slate-600">No assessments recorded yet.</p>
   {% endif %}
-</div>
+</section>
 {% endblock %}
