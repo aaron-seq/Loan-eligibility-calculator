@@ -4,7 +4,7 @@ Kept at the repository root and named ``app`` so ``gunicorn app:app`` and every
 platform that auto-detects a Flask app keep working. All real logic lives in
 the :mod:`loanapp` package; this file only builds the application.
 
-    Local:      flask --app app run --debug
+    Local:      python app.py            (reads .env next to this file)
     Production: gunicorn --workers 2 --bind 0.0.0.0:8000 app:app
 """
 
@@ -12,9 +12,15 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 
 from loanapp import create_app
-from loanapp.config import ConfigError
+from loanapp.config import ConfigError, load_env_file
+
+# Before create_app, which reads the environment. A real variable always wins
+# over the file (override=False), so this is a local convenience that cannot
+# shadow a production secret.
+load_env_file(Path(__file__).with_name(".env"))
 
 try:
     app = create_app()

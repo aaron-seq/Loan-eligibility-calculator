@@ -33,6 +33,28 @@ class ConfigError(RuntimeError):
     """Raised when the environment cannot produce a safe configuration."""
 
 
+def load_env_file(path: Path) -> bool:
+    """Load ``KEY=value`` pairs from a ``.env`` file into the environment.
+
+    Called by the process entrypoint (``app.py``), deliberately not from
+    :func:`load_config`: the library reads ``os.environ`` and nothing else, so
+    tests and embedders are never affected by a developer's local file.
+
+    ``override=False`` is the important argument. A real environment variable
+    always wins, so a ``.env`` left lying around can never silently replace a
+    production secret. ``.dockerignore`` also keeps the file out of the image.
+
+    Returns whether a file was found, so callers can log it if they wish.
+    """
+    if not path.is_file():
+        return False
+
+    from dotenv import load_dotenv  # local: only the entrypoint needs it
+
+    load_dotenv(path, override=False)
+    return True
+
+
 def _bool(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
     if raw is None:
