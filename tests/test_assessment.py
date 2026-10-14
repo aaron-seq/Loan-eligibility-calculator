@@ -256,3 +256,67 @@ class TestOutOfRange:
         assert any(
             r.code == "income_present" and r.severity == "fail" for r in result.rules
         )
+
+
+class TestFeatureRateContract:
+    """The interest rate has two jobs, and they must not be confused.
+
+    1. It computes ``emi_to_income_ratio``, which is a **model feature**. That
+       must use the rate the model was *trained* with, or the feature means
+       something different at serve time than it did at training time.
+    2. It drives the affordability figures shown to the applicant. That is a
+       business setting and should follow ``ANNUAL_INTEREST_RATE``.
+
+    Before this was separated, changing ``ANNUAL_INTEREST_RATE`` silently
+    skewed every prediction.
+    """
+
+    def test_changing_the_configured_rate_does_not_move_the_model(self, assessor):
+        from dataclasses import replace
+
+        from loanapp.assessment import Assessor
+
+        baseline = assessor.score(app())
+        skewed = Assessor(
+            assessor.bundle, replace(assessor.config, annual_interest_rate=0.25)
+        )
+        assert skewed.score(app()) == pytest.approx(baseline)
+
+    def test_features_use_the_rate_recorded_in_the_bundle(self, assessor):
+        assert assessor.feature_rate == assessor.bundle.metadata["annual_interest_rate"]
+
+    def test_affordability_still_follows_the_configured_rate(self, assessor):
+        """The applicant-facing figures are the thing the setting is *for*."""
+        from dataclasses import replace
+
+        from loanapp.assessment import Assessor
+
+        high = Assessor(
+            assessor.bundle, replace(assessor.config, annual_interest_rate=0.25)
+        )
+        low = Assessor(
+            assessor.bundle, replace(assessor.config, annual_interest_rate=0.05)
+        )
+        assert (
+            high.assess(app()).affordability.monthly_instalment
+            > low.assess(app()).affordability.monthly_instalment
+        )
+
+    def test_bundle_without_a_recorded_rate_falls_back_to_config(self, assessor):
+        """Bundles predating the metadata must still load and score."""
+        from dataclasses import replace
+
+        from loanapp.assessment import Assessor
+
+        legacy = replace(
+            assessor.bundle,
+            metadata={
+                k: v
+                for k, v in assessor.bundle.metadata.items()
+                if k != "annual_interest_rate"
+            },
+        )
+        assert (
+            Assessor(legacy, assessor.config).feature_rate
+            == assessor.config.annual_interest_rate
+        )

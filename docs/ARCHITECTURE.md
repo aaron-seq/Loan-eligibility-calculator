@@ -42,6 +42,19 @@ The check compares *minor* versions. Refusing to load across a patch release
 would turn a security patch into an outage, and patch releases do not change
 pickle layout.
 
+### The third contract: feature parameters
+
+The interest rate has two jobs. It computes `emi_to_income_ratio`, a **model
+feature**, and it drives the affordability figures shown to the applicant, a
+**business setting**. Serving used to compute both from
+`ANNUAL_INTEREST_RATE`, so changing that setting silently changed what the
+model was being fed: one application moved from 0.563 to 0.400 with nothing
+else touched.
+
+The trainer records the rate it used in the bundle, and `Assessor.feature_rate`
+reads it from there. The configured rate now changes only what the applicant
+sees. `tests/test_assessment.py::TestFeatureRateContract` holds the line.
+
 ## Layers
 
 ```

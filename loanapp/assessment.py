@@ -144,6 +144,20 @@ class Assessor:
     def __init__(self, bundle: ModelBundle, config: Config):
         self.bundle = bundle
         self.config = config
+        #: The rate used to compute ``emi_to_income_ratio`` for the *model*.
+        #:
+        #: Deliberately not ``config.annual_interest_rate``. That setting is a
+        #: business parameter for the affordability figures shown to the
+        #: applicant, and it is expected to change. The model feature must be
+        #: computed exactly as it was during training, or it means something
+        #: different at serve time: setting ANNUAL_INTEREST_RATE=0.25 moved one
+        #: application from 0.563 to 0.400 with no other change. The trainer
+        #: records the rate in the bundle, so serving reads it from there.
+        #: Bundles predating that metadata fall back to config, which is what
+        #: they were implicitly trained against.
+        self.feature_rate = float(
+            bundle.metadata.get("annual_interest_rate", config.annual_interest_rate)
+        )
 
     # -- scoring -----------------------------------------------------------
     def score_features(self, features: dict[str, float]) -> float:
@@ -152,7 +166,7 @@ class Assessor:
         return float(self.bundle.pipeline.predict_proba(frame)[0][1])
 
     def score(self, app: LoanApplication) -> float:
-        return self.score_features(engineer(app, self.config.annual_interest_rate))
+        return self.score_features(engineer(app, self.feature_rate))
 
     def band_for(self, probability: float) -> str:
         if probability >= self.config.approve_threshold:
@@ -163,9 +177,11 @@ class Assessor:
 
     # -- full assessment ---------------------------------------------------
     def assess(self, app: LoanApplication, with_guidance: bool = True) -> Assessment:
-        features = engineer(app, self.config.annual_interest_rate)
+        features = engineer(app, self.feature_rate)
         probability = self.score_features(features)
 
+        # Applicant-facing cost figures use the *configured* reference rate on
+        # purpose — see feature_rate above for why the two differ.
         affordability = compute_affordability(app, self.config)
         rules = evaluate_rules(app, affordability, self.config)
 
