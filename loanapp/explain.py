@@ -51,7 +51,7 @@ class Factor:
     direction: str  # "helps" | "hurts"
     detail: str
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "feature": self.feature,
             "label": self.label,
@@ -70,7 +70,7 @@ class Suggestion:
     projected_probability: float
     delta: float
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "action": self.action,
             "detail": self.detail,

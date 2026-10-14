@@ -18,6 +18,7 @@ import sys
 from datetime import timedelta
 
 from flask import Flask, jsonify, render_template
+from flask.typing import ResponseReturnValue
 
 from .assessment import Assessor
 from .config import Config, load_config
@@ -134,13 +135,13 @@ def _register_error_handlers(app: Flask) -> None:
     from .security import wants_json
 
     @app.errorhandler(404)
-    def not_found(_):
+    def not_found(_: Exception) -> ResponseReturnValue:
         if wants_json():
             return jsonify({"error": "not_found", "message": "No such endpoint."}), 404
         return render_template("error.html", code=404, message="Page not found."), 404
 
     @app.errorhandler(500)
-    def server_error(exc):
+    def server_error(exc: Exception) -> ResponseReturnValue:
         app.logger.exception("Unhandled error: %s", exc)
         if wants_json():
             # Never leak exception text to the client; the log has the detail.

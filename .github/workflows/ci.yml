@@ -43,6 +43,12 @@ jobs:
           ruff check loanapp tests app.py
           ruff format --check loanapp tests app.py
 
+      - name: Type check
+        # Strict, across the whole package. On its first run this found a
+        # wrong return annotation in the trainer and a schema helper that
+        # erased the concrete type at every call site.
+        run: mypy
+
       - name: Test
         run: pytest --cov=loanapp --cov-report=term-missing
 

@@ -374,3 +374,20 @@ class TestReviewRegressions:
         monkeypatch.setenv("SECRET_KEY", "k" * 40)
         monkeypatch.setenv("SESSION_COOKIE_SAMESITE", "strict")
         assert load_config("development").cookie_samesite == "Strict"
+
+
+class TestAuthenticatedUser:
+    def test_raises_a_clear_error_when_no_one_is_signed_in(self, app):
+        """A view that forgets @login_required should fail at the access check,
+        not as `'NoneType' object is not subscriptable` somewhere downstream."""
+        from loanapp.security import authenticated_user
+
+        with (
+            app.test_request_context("/"),
+            pytest.raises(RuntimeError, match="login_required"),
+        ):
+            authenticated_user()
+
+    def test_returns_the_user_when_signed_in(self, registered_client, app):
+        response = registered_client.get("/api/applications")
+        assert response.status_code == 200  # the view resolved the user

@@ -222,6 +222,12 @@ class ApplicationRepository:
                     now(),
                 ),
             )
+            # lastrowid is typed Optional because it is None before any
+            # INSERT. After a successful INSERT it is always set, so a None
+            # here means the write did not happen and must not be reported as
+            # if it had.
+            if cursor.lastrowid is None:
+                raise RuntimeError("INSERT into applications returned no row id")
             return int(cursor.lastrowid)
 
     def list_for_user(self, user_id: str, limit: int = 50) -> list[dict[str, Any]]:

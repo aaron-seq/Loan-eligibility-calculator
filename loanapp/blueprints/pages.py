@@ -11,6 +11,8 @@ wall of raw JSON.
 
 from __future__ import annotations
 
+from typing import Any
+
 from flask import (
     Blueprint,
     current_app,
@@ -20,42 +22,43 @@ from flask import (
     request,
     url_for,
 )
+from flask.typing import ResponseReturnValue
 
 from ..assessment import DISCLAIMER
 from ..schemas import ApplicationRequest, SchemaError, parse
-from ..security import current_user, login_required, rate_limit
+from ..security import authenticated_user, current_user, login_required, rate_limit
 
 pages_bp = Blueprint("pages", __name__)
 
 
 @pages_bp.app_context_processor
-def inject_globals():
+def inject_globals() -> dict[str, Any]:
     return {"current_user": current_user(), "disclaimer": DISCLAIMER}
 
 
 @pages_bp.get("/")
-def home():
+def home() -> ResponseReturnValue:
     return render_template(
         "home.html", model_status=current_app.extensions["model_status"]
     )
 
 
 @pages_bp.get("/login")
-def login():
+def login() -> ResponseReturnValue:
     if current_user():
         return redirect(url_for("pages.dashboard"))
     return render_template("auth/login.html", next=request.args.get("next", ""))
 
 
 @pages_bp.get("/signup")
-def signup():
+def signup() -> ResponseReturnValue:
     if current_user():
         return redirect(url_for("pages.dashboard"))
     return render_template("auth/signup.html")
 
 
 @pages_bp.get("/apply")
-def apply_form():
+def apply_form() -> ResponseReturnValue:
     """The application form.
 
     ``prefill`` re-opens a saved application so the applicant can adjust one
@@ -81,7 +84,7 @@ def apply_form():
 
 @pages_bp.post("/apply")
 @rate_limit("predict")
-def submit_application():
+def submit_application() -> ResponseReturnValue:
     assessor = current_app.extensions.get("assessor")
     if assessor is None:
         flash("The assessment model is not available on this deployment yet.", "error")
@@ -126,8 +129,8 @@ def submit_application():
 
 @pages_bp.get("/dashboard")
 @login_required
-def dashboard():
-    user = current_user()
+def dashboard() -> ResponseReturnValue:
+    user = authenticated_user()
     records = current_app.extensions["application_repository"].list_for_user(
         user["user_id"]
     )
@@ -136,8 +139,8 @@ def dashboard():
 
 @pages_bp.get("/applications/<int:application_id>")
 @login_required
-def view_application(application_id: int):
-    user = current_user()
+def view_application(application_id: int) -> ResponseReturnValue:
+    user = authenticated_user()
     record = current_app.extensions["application_repository"].get(
         application_id, user_id=user["user_id"]
     )
@@ -149,7 +152,7 @@ def view_application(application_id: int):
 
 
 @pages_bp.get("/how-it-works")
-def how_it_works():
+def how_it_works() -> ResponseReturnValue:
     """What the model is, how well it performs, and what it cannot do.
 
     A user-facing page rather than a buried document: a tool that tells people

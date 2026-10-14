@@ -14,9 +14,28 @@ import time
 from collections import defaultdict, deque
 from collections.abc import Callable
 from functools import wraps
+from typing import Any, TypeVar, cast
 
-from flask import current_app, flash, g, jsonify, redirect, request, session, url_for
+from flask import (
+    Flask,
+    current_app,
+    flash,
+    g,
+    jsonify,
+    redirect,
+    request,
+    session,
+    url_for,
+)
+from flask.typing import ResponseReturnValue
 from werkzeug.security import check_password_hash, generate_password_hash
+
+#: A user row as returned by UserRepository.
+User = dict[str, Any]
+
+#: Any view function. Decorators are typed to return the *same* type they
+#: receive, so wrapping a view does not erase its signature.
+ViewT = TypeVar("ViewT", bound=Callable[..., Any])
 
 CSRF_SESSION_KEY = "_csrf_token"
 CSRF_FORM_FIELD = "csrf_token"
@@ -42,16 +61,28 @@ def verify_password(password_hash: str, password: str) -> bool:
 _DUMMY_HASH = generate_password_hash("timing-equalisation-placeholder")
 
 
-def verify_user_password(user: dict | None, password: str) -> bool:
+def verify_user_password(user: User | None, password: str) -> bool:
     if user is None:
         check_password_hash(_DUMMY_HASH, password)
         return False
-    return verify_password(user["password_hash"], password)
+    return verify_password(str(user["password_hash"]), password)
 
 
 # --------------------------------------------------------------------------
 # CSRF
 # --------------------------------------------------------------------------
+def _current_view() -> Callable[..., Any] | None:
+    """The view function handling this request, or None if no route matched.
+
+    ``request.endpoint`` is None for a request that matched no route. Both the
+    CSRF hook and ``wants_json`` used to look this up separately and pass that
+    None straight into ``dict.get``; this is now the one place that handles it.
+    """
+    if request.endpoint is None:
+        return None
+    return current_app.view_functions.get(request.endpoint)
+
+
 def _carries_session_cookie() -> bool:
     return current_app.config["SESSION_COOKIE_NAME"] in request.cookies
 
@@ -87,7 +118,7 @@ def validate_csrf() -> bool:
     return hmac.compare_digest(supplied_bytes, expected_bytes)
 
 
-def install_csrf(app) -> None:
+def install_csrf(app: Flask) -> None:
     """Reject unsafe requests without a valid token, and expose it to Jinja.
 
     Applied to every state-changing request rather than per-route, so a new
@@ -95,12 +126,10 @@ def install_csrf(app) -> None:
     """
 
     @app.before_request
-    def _check_csrf():
+    def _check_csrf() -> ResponseReturnValue | None:
         if request.method in SAFE_METHODS:
             return None
-        if getattr(
-            current_app.view_functions.get(request.endpoint), "_csrf_exempt", False
-        ):
+        if getattr(_current_view(), "_csrf_exempt", False):
             return None
         if not _carries_session_cookie():
             # CSRF is an attack on ambient credentials. A request with no
@@ -129,9 +158,9 @@ def install_csrf(app) -> None:
     app.jinja_env.globals["csrf_token"] = csrf_token
 
 
-def csrf_exempt(view: Callable) -> Callable:
+def csrf_exempt(view: ViewT) -> ViewT:
     """Opt a view out of CSRF checking. Use sparingly and say why."""
-    view._csrf_exempt = True
+    setattr(view, "_csrf_exempt", True)  # noqa: B010 - marker attribute
     return view
 
 
@@ -221,17 +250,17 @@ def client_identifier() -> str:
     return request.remote_addr or "unknown"
 
 
-def rate_limit(limit_name: str) -> Callable:
+def rate_limit(limit_name: str) -> Callable[[ViewT], ViewT]:
     """Rate limit a view using the named limit from config."""
 
-    def decorator(view: Callable) -> Callable:
+    def decorator(view: ViewT) -> ViewT:
         @wraps(view)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: Any, **kwargs: Any) -> ResponseReturnValue:
             limit, window = current_app.config["RATE_LIMITS"][limit_name]
             key = f"{limit_name}:{client_identifier()}"
             allowed, retry_after = limiter.check(key, limit, window)
             if allowed:
-                return view(*args, **kwargs)
+                return cast(ResponseReturnValue, view(*args, **kwargs))
 
             current_app.logger.warning(
                 "rate limit hit: limit=%s client=%s", limit_name, key
@@ -245,7 +274,7 @@ def rate_limit(limit_name: str) -> Callable:
             flash(message, "error")
             return redirect(url_for("pages.apply_form"))
 
-        return wrapper
+        return cast(ViewT, wrapper)
 
     return decorator
 
@@ -253,61 +282,76 @@ def rate_limit(limit_name: str) -> Callable:
 # --------------------------------------------------------------------------
 # Auth
 # --------------------------------------------------------------------------
-def json_endpoint(view: Callable) -> Callable:
+def json_endpoint(view: ViewT) -> ViewT:
     """Mark a view outside ``/api/`` as returning JSON.
 
     Without this, path-sniffing sends a machine-readable endpoint such as
     ``/admin/stats`` an HTML redirect when the caller is unauthorised, which is
     useless to the scraper or dashboard consuming it.
     """
-    view._returns_json = True
+    setattr(view, "_returns_json", True)  # noqa: B010 - marker attribute
     return view
 
 
 def wants_json() -> bool:
     if request.path.startswith("/api/") or request.is_json:
         return True
-    view = current_app.view_functions.get(request.endpoint)
-    return bool(getattr(view, "_returns_json", False))
+    return bool(getattr(_current_view(), "_returns_json", False))
 
 
-def current_user() -> dict | None:
+def current_user() -> User | None:
     """The logged-in user, loaded once per request."""
     if "current_user" not in g:
         user_id = session.get("user_id")
         g.current_user = (
             current_app.extensions["user_repository"].find(user_id) if user_id else None
         )
-    return g.current_user
+    return cast(User | None, g.current_user)
 
 
-def login_required(view: Callable) -> Callable:
+def authenticated_user() -> User:
+    """The logged-in user, for views behind ``@login_required``.
+
+    Views used to index ``current_user()["user_id"]`` directly, relying on the
+    decorator to have run. Forgetting the decorator then failed as
+    ``TypeError: 'NoneType' object is not subscriptable`` deep inside the view,
+    which reads like a data bug rather than a missing access check. This fails
+    at the right place with the right message.
+    """
+    user = current_user()
+    if user is None:
+        raise RuntimeError(
+            "authenticated_user() called without a signed-in user; "
+            "is the view missing @login_required?"
+        )
+    return user
+
+
+def _unauthorised() -> ResponseReturnValue:
+    if wants_json():
+        return jsonify({"error": "unauthorised", "message": "Sign in to continue."}), 401
+    return redirect(url_for("pages.login", next=request.path))
+
+
+def login_required(view: ViewT) -> ViewT:
     @wraps(view)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: Any, **kwargs: Any) -> ResponseReturnValue:
         if current_user() is None:
             # Clear a stale session so a deleted or deactivated account cannot
             # keep presenting a cookie that looks logged in.
             session.clear()
-            if wants_json():
-                return jsonify(
-                    {"error": "unauthorised", "message": "Sign in to continue."}
-                ), 401
-            return redirect(url_for("pages.login", next=request.path))
-        return view(*args, **kwargs)
+            return _unauthorised()
+        return cast(ResponseReturnValue, view(*args, **kwargs))
 
-    return wrapper
+    return cast(ViewT, wrapper)
 
 
-def admin_required(view: Callable) -> Callable:
+def admin_required(view: ViewT) -> ViewT:
     @wraps(view)
-    def wrapper(*args, **kwargs):
+    def wrapper(*args: Any, **kwargs: Any) -> ResponseReturnValue:
         user = current_user()
         if user is None:
-            if wants_json():
-                return jsonify(
-                    {"error": "unauthorised", "message": "Sign in to continue."}
-                ), 401
-            return redirect(url_for("pages.login", next=request.path))
+            return _unauthorised()
         if not user.get("is_admin"):
             current_app.logger.warning(
                 "admin access denied for user_id=%s", user["user_id"]
@@ -317,12 +361,12 @@ def admin_required(view: Callable) -> Callable:
                     {"error": "forbidden", "message": "Administrator access required."}
                 ), 403
             return redirect(url_for("pages.dashboard"))
-        return view(*args, **kwargs)
+        return cast(ResponseReturnValue, view(*args, **kwargs))
 
-    return wrapper
+    return cast(ViewT, wrapper)
 
 
-def start_session(user: dict) -> None:
+def start_session(user: User) -> None:
     """Log a user in, rotating the session to prevent fixation."""
     session.clear()
     session["user_id"] = user["user_id"]

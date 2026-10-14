@@ -180,11 +180,12 @@ Requires Python 3.11 or newer — the floor is set by numpy 2.4, pandas 3.0 and
 scikit-learn 1.9, which all declare `requires-python >=3.11`.
 
 ```bash
-make test     # pytest + coverage (currently 86%)
-make lint     # ruff check + format check
-make audit    # pip-audit (dependency CVEs) + bandit (static scan)
-make check    # all three — what CI runs
-make train    # retrain and regenerate the model card
+make test       # pytest + coverage (currently 86%)
+make lint       # ruff check + format check
+make typecheck  # mypy --strict across the package
+make audit      # pip-audit (dependency CVEs) + bandit (static scan)
+make check      # all of the above — what CI runs
+make train      # retrain and regenerate the model card
 ```
 
 CI runs the suite on Python 3.11/3.12/3.13, audits dependencies against the PyPI
