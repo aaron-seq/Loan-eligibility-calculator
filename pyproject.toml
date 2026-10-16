@@ -87,6 +87,7 @@ addopts = "-q --strict-markers --strict-config"
 markers = [
   "requires_model: needs a trained bundle in models/ (skipped if absent)",
   "slow: spawns real subprocesses; the only way to catch cross-process races",
+  "a11y: axe-core audit in a real browser (skipped if no Chromium is installed)",
 ]
 filterwarnings = [
   "error::DeprecationWarning:loanapp.*",
