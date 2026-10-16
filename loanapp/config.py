@@ -55,11 +55,28 @@ def load_env_file(path: Path) -> bool:
     return True
 
 
+_TRUE = ("1", "true", "yes", "on")
+_FALSE = ("0", "false", "no", "off")
+
+
 def _bool(name: str, default: bool) -> bool:
+    """Parse a boolean, refusing anything unrecognised.
+
+    Unrecognised used to mean False, which fails open for
+    ``SESSION_COOKIE_SECURE``: a typo of "true" sent the session cookie over
+    plain HTTP with no sign anything was wrong.
+    """
     raw = os.environ.get(name)
-    if raw is None:
+    if raw is None or raw.strip() == "":
         return default
-    return raw.strip().lower() in ("1", "true", "yes", "on")
+    value = raw.strip().lower()
+    if value in _TRUE:
+        return True
+    if value in _FALSE:
+        return False
+    raise ConfigError(
+        f"{name} must be true or false (or 1/0, yes/no, on/off); got {raw!r}"
+    )
 
 
 def _int(name: str, default: int) -> int:
@@ -117,6 +134,11 @@ class Config:
     session_lifetime_seconds: int = 3600
     cookie_secure: bool = True
     cookie_samesite: str = "Lax"
+
+    # Whether to read the client IP from X-Forwarded-For, and how many hops
+    # from the right. Only safe behind a proxy you control — see security.py.
+    trusted_proxy: bool = False
+    trusted_proxy_depth: int = 1
 
     # Rate limits (requests per window, per client IP)
     login_rate_limit: tuple[int, int] = (10, 300)
@@ -218,6 +240,8 @@ def load_config(env: str | None = None) -> Config:
         predict_rate_limit=_rate_limit("RATE_LIMIT_PREDICT", (30, 3600)),
         cookie_secure=_bool("SESSION_COOKIE_SECURE", env == "production"),
         cookie_samesite=samesite,
+        trusted_proxy=_bool("TRUSTED_PROXY", False),
+        trusted_proxy_depth=_int("TRUSTED_PROXY_DEPTH", 1),
         annual_interest_rate=_float("ANNUAL_INTEREST_RATE", 0.105),
         max_emi_to_income=_float("MAX_EMI_TO_INCOME", 0.50),
         approve_threshold=_float("APPROVE_THRESHOLD", 0.65),
@@ -232,6 +256,11 @@ def load_config(env: str | None = None) -> Config:
         )
     if not 0 <= config.annual_interest_rate < 1:
         raise ConfigError("ANNUAL_INTEREST_RATE is a fraction, e.g. 0.105 for 10.5%")
+    if config.trusted_proxy_depth < 1:
+        raise ConfigError(
+            "TRUSTED_PROXY_DEPTH counts proxies in front of the app and must be "
+            f"at least 1; got {config.trusted_proxy_depth}"
+        )
 
     if on_serverless:
         if database_path.startswith(SERVERLESS_WRITABLE_DIR):

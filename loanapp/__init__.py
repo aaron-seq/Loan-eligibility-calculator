@@ -13,7 +13,6 @@ endpoints return 503 with an actionable message instead of a stack trace.
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from datetime import timedelta
 
@@ -49,7 +48,8 @@ def create_app(config: Config | None = None) -> Flask:
         SESSION_COOKIE_SAMESITE=config.cookie_samesite,
         PERMANENT_SESSION_LIFETIME=timedelta(seconds=config.session_lifetime_seconds),
         MAX_CONTENT_LENGTH=256 * 1024,  # no endpoint accepts an upload
-        TRUSTED_PROXY=bool(os.environ.get("TRUSTED_PROXY")),
+        TRUSTED_PROXY=config.trusted_proxy,
+        TRUSTED_PROXY_DEPTH=config.trusted_proxy_depth,
         RATE_LIMITS={
             "login": config.login_rate_limit,
             "register": config.register_rate_limit,
