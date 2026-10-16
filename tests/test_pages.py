@@ -203,3 +203,46 @@ class TestReviewRegressions:
         assert "Estimated approval probability" not in body
         # The deterministic checks must still be there to answer the question.
         assert "No income recorded" in body
+
+
+class TestAccessibility:
+    """What an automated checker cannot see. axe-core passed on every page
+    before these fixes; each of these was found by inspection instead."""
+
+    def test_an_invalid_field_announces_its_own_error(self, client):
+        """The error used to appear visually beside the field only, so a
+        screen-reader user tabbing in heard nothing about it (WCAG 3.3.1)."""
+        import re
+
+        body = client.post(
+            "/apply", data=form_with_csrf(client, loan_amount="-5")
+        ).data.decode()
+        field = re.search(r'<input[^>]*name="loan_amount"[^>]*>', body).group(0)
+        assert 'aria-invalid="true"' in field
+        assert 'aria-describedby="loan_amount-error"' in field
+        error = re.search(r'id="loan_amount-error"[^>]*>([^<]+)<', body)
+        assert error and error.group(1).strip()  # the reference resolves to text
+
+    def test_valid_fields_are_not_marked_invalid(self, client):
+        body = client.get("/apply").data.decode()
+        assert "aria-invalid" not in body
+
+    def test_every_page_starts_with_a_skip_link_to_main(self, client):
+        """WCAG 2.4.1: keyboard users can bypass the nav."""
+        import re
+
+        for path in ("/", "/apply", "/how-it-works", "/login"):
+            body = client.get(path).data.decode()
+            first_link = re.search(r"<body[^>]*>.*?<a\s([^>]*)>", body, re.S).group(1)
+            assert 'href="#main"' in first_link, path
+            assert 'id="main"' in body, path
+
+    def test_rule_severity_is_stated_in_words(self, client):
+        """The glyphs were read aloud literally — "multiplication x" for a
+        failure — and the severity itself was never spoken."""
+        body = client.post(
+            "/apply",
+            data=form_with_csrf(client, applicant_income="20000", loan_amount="5000000"),
+        ).data.decode()
+        assert '<span class="sr-only">Failed:</span>' in body
+        assert '<span aria-hidden="true">✕</span>' in body

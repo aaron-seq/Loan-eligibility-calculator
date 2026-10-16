@@ -13,6 +13,11 @@
 </head>
 <body class="h-full bg-slate-50 text-slate-800 antialiased flex flex-col">
 
+{# First focusable element on every page, hidden until focused. Lets keyboard
+   users skip the nav instead of tabbing through it each time (WCAG 2.4.1). #}
+<a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-indigo-600 focus:px-4 focus:py-2 focus:text-white">
+  Skip to main content
+</a>
 
 <header class="bg-white border-b border-slate-200">
   {# flex-wrap + whitespace-nowrap: at phone width the link row moves below the
@@ -43,7 +48,7 @@
   </nav>
 </header>
 
-<main class="flex-1 max-w-5xl w-full mx-auto px-4 py-8">
+<main id="main" tabindex="-1" class="flex-1 max-w-5xl w-full mx-auto px-4 py-8 focus:outline-none">
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       <div class="mb-6 space-y-2">

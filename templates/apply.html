@@ -1,11 +1,18 @@
 {% extends "base.html" %}
 {% block title %}Check your eligibility — LoanWise{% endblock %}
 
+{# The error <p> has an id, and invalid() marks the input and points at it.
+   Without the pairing a screen-reader user tabbing into the field heard nothing
+   about the error, which only appeared visually beside it (WCAG 3.3.1). #}
 {% macro field_error(errors, name) %}
   {% if errors and errors.get(name) %}
-    <p class="mt-1 text-xs text-rose-600">{{ errors[name] }}</p>
+    <p id="{{ name }}-error" class="mt-1 text-xs text-rose-600">{{ errors[name] }}</p>
   {% endif %}
 {% endmacro %}
+
+{% macro invalid(errors, name) -%}
+  {%- if errors and errors.get(name) %} aria-invalid="true" aria-describedby="{{ name }}-error"{% endif -%}
+{%- endmacro %}
 
 {% block content %}
 <div class="max-w-3xl mx-auto">
@@ -35,7 +42,7 @@
           <label for="applicant_income" class="block text-sm font-medium text-slate-700">
             Your monthly income
           </label>
-          <input type="number" step="any" min="0" required id="applicant_income" name="applicant_income"
+          <input type="number" step="any" min="0" required id="applicant_income" name="applicant_income"{{ invalid(errors, 'applicant_income') }}
                  value="{{ prefill.get('applicant_income', '') }}"
                  class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm"
                  placeholder="e.g. 55000">
@@ -46,7 +53,7 @@
           <label for="coapplicant_income" class="block text-sm font-medium text-slate-700">
             Co-applicant monthly income
           </label>
-          <input type="number" step="any" min="0" id="coapplicant_income" name="coapplicant_income"
+          <input type="number" step="any" min="0" id="coapplicant_income" name="coapplicant_income"{{ invalid(errors, 'coapplicant_income') }}
                  value="{{ prefill.get('coapplicant_income', 0) }}"
                  class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm"
                  placeholder="0 if applying alone">
@@ -56,7 +63,7 @@
           <label for="loan_amount" class="block text-sm font-medium text-slate-700">
             Loan amount
           </label>
-          <input type="number" step="any" min="1" required id="loan_amount" name="loan_amount"
+          <input type="number" step="any" min="1" required id="loan_amount" name="loan_amount"{{ invalid(errors, 'loan_amount') }}
                  value="{{ prefill.get('loan_amount', '') }}"
                  class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm"
                  placeholder="e.g. 1500000">
@@ -70,7 +77,7 @@
           <label for="loan_term_months" class="block text-sm font-medium text-slate-700">
             Repayment term (months)
           </label>
-          <input type="number" min="6" max="480" required id="loan_term_months" name="loan_term_months"
+          <input type="number" min="6" max="480" required id="loan_term_months" name="loan_term_months"{{ invalid(errors, 'loan_term_months') }}
                  value="{{ prefill.get('loan_term_months', 360) }}"
                  class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm">
           {{ field_error(errors, 'loan_term_months') }}
@@ -85,7 +92,7 @@
           <label for="credit_history" class="block text-sm font-medium text-slate-700">
             Repayment history
           </label>
-          <select id="credit_history" name="credit_history"
+          <select id="credit_history" name="credit_history"{{ invalid(errors, 'credit_history') }}
                   class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm">
             <option value="1" {% if prefill.get('credit_history', 1)|int == 1 %}selected{% endif %}>
               No defaults or missed payments
@@ -100,7 +107,7 @@
           <label for="cibil_score" class="block text-sm font-medium text-slate-700">
             Credit score <span class="font-normal text-slate-500">(optional)</span>
           </label>
-          <input type="number" min="300" max="900" id="cibil_score" name="cibil_score"
+          <input type="number" min="300" max="900" id="cibil_score" name="cibil_score"{{ invalid(errors, 'cibil_score') }}
                  value="{{ prefill.get('cibil_score') or '' }}"
                  class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm"
                  placeholder="300-900">
