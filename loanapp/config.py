@@ -72,6 +72,28 @@ def _int(name: str, default: int) -> int:
         raise ConfigError(f"{name} must be an integer, got {raw!r}") from exc
 
 
+def _rate_limit(name: str, default: tuple[int, int]) -> tuple[int, int]:
+    """Parse ``"<requests>/<seconds>"``, e.g. ``RATE_LIMIT_PREDICT=500/3600``.
+
+    Malformed values are fatal rather than ignored: falling back to the
+    default would hide a typo, and treating a bad value as "unlimited" would
+    silently disable the limit.
+    """
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    count, _, window = raw.strip().partition("/")
+    try:
+        limit = (int(count), int(window))
+    except ValueError as exc:
+        raise ConfigError(
+            f"{name} must be <requests>/<seconds>, e.g. 30/3600; got {raw!r}"
+        ) from exc
+    if limit[0] <= 0 or limit[1] <= 0:
+        raise ConfigError(f"{name} needs a positive count and window; got {raw!r}")
+    return limit
+
+
 def _float(name: str, default: float) -> float:
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
@@ -191,6 +213,9 @@ def load_config(env: str | None = None) -> Config:
         database_path=database_path,
         model_dir=model_dir,
         session_lifetime_seconds=_int("SESSION_LIFETIME_SECONDS", 3600),
+        login_rate_limit=_rate_limit("RATE_LIMIT_LOGIN", (10, 300)),
+        register_rate_limit=_rate_limit("RATE_LIMIT_REGISTER", (5, 3600)),
+        predict_rate_limit=_rate_limit("RATE_LIMIT_PREDICT", (30, 3600)),
         cookie_secure=_bool("SESSION_COOKIE_SECURE", env == "production"),
         cookie_samesite=samesite,
         annual_interest_rate=_float("ANNUAL_INTEREST_RATE", 0.105),

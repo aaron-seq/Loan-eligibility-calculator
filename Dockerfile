@@ -67,11 +67,22 @@ EXPOSE 8000
 # The health endpoint returns 200 even with no model loaded — the process is
 # alive, everything except assessment works, and restarting will not conjure a
 # model. Deliberate; see loanapp/blueprints/api.py.
+#
+# ${PORT}, not a hardcoded 8000: the server binds to ${PORT}, so with any other
+# value a fixed port made the check fail forever and the orchestrator
+# restart-looped a healthy container. Shell form, so the variable expands.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health').status==200 else 1)"
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:${PORT}/api/health').status==200 else 1)"
 
-# Two workers: the model is loaded per worker, so memory scales with this.
-# Multi-worker startup is safe — loanapp/db.py sets the WAL journal mode once
-# at init rather than per connection, which is what made concurrent workers
-# collide on the exclusive lock.
-CMD ["sh", "-c", "gunicorn --workers 2 --threads 4 --timeout 60 --bind 0.0.0.0:${PORT} app:app"]
+# Worker count comes from WEB_CONCURRENCY, the convention gunicorn and most
+# hosting platforms use; set it to the number of CPUs. Measured with
+# scripts/benchmark.py on 4 CPUs: 20.9 / 41.2 / 86.3 req/s at 1 / 2 / 4
+# workers — linear, because scoring is CPU-bound and holds the GIL, so extra
+# *threads* add no throughput and extra *processes* do. The previous fixed
+# "--workers 2" left half of a 4-CPU host idle.
+#
+# Threads stay at 2 only so a slow client cannot block a worker outright.
+# Each worker loads its own copy of the model (small for a linear model), and
+# multi-worker startup is safe: loanapp/db.py sets WAL once at init.
+ENV WEB_CONCURRENCY=2
+CMD ["sh", "-c", "gunicorn --workers ${WEB_CONCURRENCY} --threads 2 --timeout 60 --bind 0.0.0.0:${PORT} app:app"]

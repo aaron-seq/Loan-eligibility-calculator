@@ -391,3 +391,41 @@ class TestAuthenticatedUser:
     def test_returns_the_user_when_signed_in(self, registered_client, app):
         response = registered_client.get("/api/applications")
         assert response.status_code == 200  # the view resolved the user
+
+
+class TestRateLimitConfig:
+    """Limits were hardcoded. Behind a corporate NAT an entire office shares one
+    IP, so 30 assessments an hour locked everyone out with no operator lever."""
+
+    def test_defaults_are_unchanged(self, monkeypatch):
+        from loanapp.config import load_config
+
+        monkeypatch.setenv("SECRET_KEY", "k" * 40)
+        for name in ("RATE_LIMIT_LOGIN", "RATE_LIMIT_REGISTER", "RATE_LIMIT_PREDICT"):
+            monkeypatch.delenv(name, raising=False)
+        config = load_config("development")
+        assert config.login_rate_limit == (10, 300)
+        assert config.register_rate_limit == (5, 3600)
+        assert config.predict_rate_limit == (30, 3600)
+
+    def test_each_limit_is_configurable(self, monkeypatch):
+        from loanapp.config import load_config
+
+        monkeypatch.setenv("SECRET_KEY", "k" * 40)
+        monkeypatch.setenv("RATE_LIMIT_PREDICT", "500/60")
+        monkeypatch.setenv("RATE_LIMIT_LOGIN", "20/600")
+        config = load_config("development")
+        assert config.predict_rate_limit == (500, 60)
+        assert config.login_rate_limit == (20, 600)
+
+    @pytest.mark.parametrize(
+        "value", ["30", "30/", "/60", "abc/60", "30/xyz", "0/60", "30/0", "-1/60"]
+    )
+    def test_malformed_limits_fail_at_startup(self, monkeypatch, value):
+        """A typo must not silently disable rate limiting."""
+        from loanapp.config import ConfigError, load_config
+
+        monkeypatch.setenv("SECRET_KEY", "k" * 40)
+        monkeypatch.setenv("RATE_LIMIT_PREDICT", value)
+        with pytest.raises(ConfigError, match="RATE_LIMIT_PREDICT"):
+            load_config("development")

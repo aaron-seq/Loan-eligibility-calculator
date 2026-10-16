@@ -40,8 +40,8 @@ jobs:
 
       - name: Lint
         run: |
-          ruff check loanapp tests app.py
-          ruff format --check loanapp tests app.py
+          ruff check loanapp tests scripts app.py
+          ruff format --check loanapp tests scripts app.py
 
       - name: Committed stylesheet matches the templates
         # Tailwind only emits classes it finds in templates/, so a class added

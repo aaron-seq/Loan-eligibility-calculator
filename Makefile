@@ -24,15 +24,15 @@ test: ## Run the test suite with coverage
 	python -m pytest --cov=loanapp --cov-report=term-missing
 
 lint: ## Check formatting and lint rules
-	python -m ruff check loanapp tests app.py
-	python -m ruff format --check loanapp tests app.py
+	python -m ruff check loanapp tests scripts app.py
+	python -m ruff format --check loanapp tests scripts app.py
 
 typecheck: ## Strict static type check
 	python -m mypy
 
 fmt: ## Auto-format
-	python -m ruff format loanapp tests app.py
-	python -m ruff check --fix loanapp tests app.py
+	python -m ruff format loanapp tests scripts app.py
+	python -m ruff check --fix loanapp tests scripts app.py
 
 audit: ## Dependency vulnerability scan + static security scan
 	python -m pip_audit -r requirements.txt -r requirements-dev.txt --strict

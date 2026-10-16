@@ -21,6 +21,9 @@ reasoning is below.
 | `DATABASE_PATH` | no | Defaults to `./loanwise.db`, or `/tmp/loanwise.db` on serverless |
 | `MODEL_DIR` | no | Defaults to `./models` |
 | `TRUSTED_PROXY` | only behind a proxy | Makes rate limiting trust `X-Forwarded-For` |
+| `WEB_CONCURRENCY` | no | gunicorn worker processes (Docker default 2). **Set to the CPU count**: throughput scales linearly with processes, not threads — see [`BENCHMARKS.md`](BENCHMARKS.md) |
+| `RATE_LIMIT_PREDICT` | no | `<requests>/<seconds>`, default `30/3600`. Raise it if many users share one IP (corporate NAT) |
+| `RATE_LIMIT_LOGIN` / `RATE_LIMIT_REGISTER` | no | Same format; defaults `10/300` and `5/3600`. A malformed value stops the app from starting |
 | `SESSION_COOKIE_SECURE` | no | Defaults to true in production |
 | — | — | Requires Python >= 3.11 (set by numpy/pandas/scikit-learn) |
 | `ANNUAL_INTEREST_RATE` | no | Fraction, e.g. `0.105`. Affordability reference rate. |
@@ -45,6 +48,7 @@ miserable to diagnose. Failing at boot with a message is better.
 docker build -t loanwise .
 
 docker run -d --name loanwise -p 8000:8000 \
+  -e WEB_CONCURRENCY="$(nproc)" \
   -e SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" \
   -e FLASK_ENV=production \
   -v loanwise-data:/data \
