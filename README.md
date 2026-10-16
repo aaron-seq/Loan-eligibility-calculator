@@ -42,6 +42,11 @@ here is typed by hand.
 | Accuracy @ 0.65 | **0.797** | vs. a 68.7% always-approve baseline |
 | Monotonic in loan amount | **yes** (0/216 reversals) | required for the guidance feature |
 
+A full assessment — estimate, explanation and guidance — takes **33 ms** at
+p50 in-process, and the service sustains **86 req/s on 4 CPUs**, scaling
+linearly with worker processes. Methodology, caveats and the script to
+reproduce them: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+
 614 rows is a small dataset. This is a well-engineered demonstration of a
 calibrated, explainable decisioning service — not a model validated for real
 credit underwriting, and it does not claim to be.
@@ -112,7 +117,9 @@ templates/         Jinja templates
 data/              train.csv, test.csv
 models/            Committed model bundle + metrics.json
 notebooks/         Original exploratory analysis, kept for provenance
-docs/              ARCHITECTURE · MODEL (generated) · DEPLOYMENT · API · ROADMAP
+docs/              ARCHITECTURE · MODEL (generated) · DEPLOYMENT · API · BENCHMARKS · ROADMAP
+scripts/           benchmark.py — regenerates docs/BENCHMARKS.md figures
+static/            css/app.css (committed Tailwind build) · src/tailwind.css
 ```
 
 ## How the pieces fit together
@@ -180,11 +187,12 @@ Requires Python 3.11 or newer — the floor is set by numpy 2.4, pandas 3.0 and
 scikit-learn 1.9, which all declare `requires-python >=3.11`.
 
 ```bash
-make test     # pytest + coverage (currently 86%)
-make lint     # ruff check + format check
-make audit    # pip-audit (dependency CVEs) + bandit (static scan)
-make check    # all three — what CI runs
-make train    # retrain and regenerate the model card
+make test       # pytest + coverage (currently 86%)
+make lint       # ruff check + format check
+make typecheck  # mypy --strict across the package
+make audit      # pip-audit (dependency CVEs) + bandit (static scan)
+make check      # all of the above — what CI runs
+make train      # retrain and regenerate the model card
 ```
 
 CI runs the suite on Python 3.11/3.12/3.13, audits dependencies against the PyPI

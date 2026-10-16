@@ -13,11 +13,11 @@ endpoints return 503 with an actionable message instead of a stack trace.
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from datetime import timedelta
 
 from flask import Flask, jsonify, render_template
+from flask.typing import ResponseReturnValue
 
 from .assessment import Assessor
 from .config import Config, load_config
@@ -48,7 +48,8 @@ def create_app(config: Config | None = None) -> Flask:
         SESSION_COOKIE_SAMESITE=config.cookie_samesite,
         PERMANENT_SESSION_LIFETIME=timedelta(seconds=config.session_lifetime_seconds),
         MAX_CONTENT_LENGTH=256 * 1024,  # no endpoint accepts an upload
-        TRUSTED_PROXY=bool(os.environ.get("TRUSTED_PROXY")),
+        TRUSTED_PROXY=config.trusted_proxy,
+        TRUSTED_PROXY_DEPTH=config.trusted_proxy_depth,
         RATE_LIMITS={
             "login": config.login_rate_limit,
             "register": config.register_rate_limit,
@@ -134,13 +135,13 @@ def _register_error_handlers(app: Flask) -> None:
     from .security import wants_json
 
     @app.errorhandler(404)
-    def not_found(_):
+    def not_found(_: Exception) -> ResponseReturnValue:
         if wants_json():
             return jsonify({"error": "not_found", "message": "No such endpoint."}), 404
         return render_template("error.html", code=404, message="Page not found."), 404
 
     @app.errorhandler(500)
-    def server_error(exc):
+    def server_error(exc: Exception) -> ResponseReturnValue:
         app.logger.exception("Unhandled error: %s", exc)
         if wants_json():
             # Never leak exception text to the client; the log has the detail.

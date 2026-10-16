@@ -13,7 +13,7 @@ explained to the applicant rather than rejected as a 400.
 from __future__ import annotations
 
 import re
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 
 from pydantic import (
     BaseModel,
@@ -25,6 +25,10 @@ from pydantic import (
 )
 
 from .features import LoanApplication
+
+# A TypeVar rather than PEP 695 `def parse[T: BaseModel]`: that syntax needs
+# Python 3.12 and this project supports 3.11.
+ModelT = TypeVar("ModelT", bound=BaseModel)
 
 USER_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_.-]{3,50}$")
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[a-zA-Z]{2,}$")
@@ -48,8 +52,13 @@ def _flatten(exc: ValidationError) -> dict[str, str]:
     return errors
 
 
-def parse(model: type[BaseModel], payload: Any) -> BaseModel:
-    """Validate ``payload`` against ``model``, raising :class:`SchemaError`."""
+def parse(model: type[ModelT], payload: Any) -> ModelT:
+    """Validate ``payload`` against ``model``, raising :class:`SchemaError`.
+
+    Generic in the model so callers get the concrete schema back. It used to
+    return a bare ``BaseModel``, which meant ``data.user_id`` was unchecked at
+    every call site and a mistyped field name was a runtime ``AttributeError``.
+    """
     try:
         return model.model_validate(dict(payload or {}))
     except ValidationError as exc:

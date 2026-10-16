@@ -62,6 +62,24 @@ ignore = [
 "tests/*" = ["SLF001", "E402", "S105", "S106"]
 "loanapp/ml/train.py" = ["T201"] # the trainer is a CLI; printing is its interface
 
+[tool.mypy]
+# mypy rather than pyright: the pip `pyright` package downloads a Node runtime
+# on first run, and this project deliberately has no Node toolchain.
+python_version = "3.11"
+files = ["loanapp", "app.py"]
+# Strict everywhere. An earlier version applied `strict` through a per-module
+# override for the domain modules only; it leaked to every module anyway, so
+# the config did not do what its own comment said. The codebase is small
+# enough to hold to one standard, which is simpler than a split that misleads.
+strict = true
+warn_unused_configs = true
+
+# scikit-learn and joblib ship no type information. Scoped to those packages
+# rather than set globally, so a missing stub anywhere else is still reported.
+[[tool.mypy.overrides]]
+module = ["sklearn.*", "joblib.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
@@ -69,6 +87,7 @@ addopts = "-q --strict-markers --strict-config"
 markers = [
   "requires_model: needs a trained bundle in models/ (skipped if absent)",
   "slow: spawns real subprocesses; the only way to catch cross-process races",
+  "a11y: axe-core audit in a real browser (skipped if no Chromium is installed)",
 ]
 filterwarnings = [
   "error::DeprecationWarning:loanapp.*",
