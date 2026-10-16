@@ -194,6 +194,39 @@ class TestReviewRegressions:
         assert response.status_code == 200
         assert b"session expired" in response.data.lower()
 
+    @pytest.mark.parametrize(
+        ("limit", "post_to", "lands_on"),
+        [
+            ("login", "/login", "/login"),
+            ("register", "/register", "/signup"),
+            ("predict", "/apply", "/apply"),
+        ],
+    )
+    def test_a_rate_limited_form_returns_to_that_form(
+        self, app, client, limit, post_to, lands_on
+    ):
+        """Every rate-limited browser post used to land on the loan form, so
+        someone who mistyped their password a few times was sent to an
+        unrelated page with their sign-in form gone."""
+        app.config["RATE_LIMITS"][limit] = (1, 60)
+        # The limit is checked before the body is parsed, so the first post
+        # uses up the allowance whatever it contains.
+        data = form_with_csrf(client)
+        client.post(post_to, data=data)
+        response = client.post(post_to, data=data)
+        assert response.status_code == 302
+        assert response.headers["Location"] == lands_on
+        assert b"Too many requests" in client.get(lands_on).data
+
+    @pytest.mark.parametrize(
+        ("post_to", "lands_on"), [("/login", "/login"), ("/register", "/signup")]
+    )
+    def test_a_stale_csrf_token_returns_to_that_form(self, client, post_to, lands_on):
+        client.get(lands_on)  # establishes a session cookie
+        response = client.post(post_to, data={"csrf_token": "stale-and-wrong"})
+        assert response.status_code == 302
+        assert response.headers["Location"] == lands_on
+
     def test_result_page_withholds_the_probability_when_out_of_range(self, client):
         """A 20% floor quoted to someone with no income is worse than silence."""
         body = client.post(

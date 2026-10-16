@@ -83,6 +83,22 @@ def _current_view() -> Callable[..., Any] | None:
     return current_app.view_functions.get(request.endpoint)
 
 
+#: The page holding the form for each endpoint a browser posts to, for
+#: endpoints other than the loan form.
+_FORM_PAGES = {"auth.login": "pages.login", "auth.register": "pages.signup"}
+
+
+def _back_to_form() -> ResponseReturnValue:
+    """Send a browser back to the form whose post was just rejected.
+
+    Rejected posts used to go to the loan application form whatever they
+    were, so someone rate-limited while signing in landed on an unrelated
+    page with their sign-in form gone. The flashed message renders on
+    whichever page this lands on.
+    """
+    return redirect(url_for(_FORM_PAGES.get(request.endpoint or "", "pages.apply_form")))
+
+
 def _carries_session_cookie() -> bool:
     return current_app.config["SESSION_COOKIE_NAME"] in request.cookies
 
@@ -153,7 +169,7 @@ def install_csrf(app: Flask) -> None:
             "Please fill it in again.",
             "error",
         )
-        return redirect(url_for("pages.apply_form"))
+        return _back_to_form()
 
     app.jinja_env.globals["csrf_token"] = csrf_token
 
@@ -272,7 +288,7 @@ def rate_limit(limit_name: str) -> Callable[[ViewT], ViewT]:
                 response.headers["Retry-After"] = str(retry_after)
                 return response
             flash(message, "error")
-            return redirect(url_for("pages.apply_form"))
+            return _back_to_form()
 
         return cast(ViewT, wrapper)
 
