@@ -212,13 +212,16 @@ class Assessor:
             base_probability=probability,
         )
 
+        out_of_range_reason = _extrapolation_reason(app, features)
+
         suggestions: list[Suggestion] = []
-        # Someone already in the "likely" band does not need advice on how to
-        # get there; showing it anyway would be filler.
+        # No guidance for someone already in the "likely" band (it would be
+        # filler), nor when the application is out of range (the number it
+        # would try to improve is not meaningful).
         if (
             with_guidance
             and probability < self.config.approve_threshold
-            and _extrapolation_reason(app, features) is None
+            and out_of_range_reason is None
         ):
             suggestions = suggest_improvements(
                 app=app,
@@ -227,7 +230,6 @@ class Assessor:
                 config=self.config,
             )
 
-        out_of_range_reason = _extrapolation_reason(app, features)
         band = self.band_for(probability)
         return Assessment(
             probability=probability,
