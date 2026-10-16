@@ -91,6 +91,113 @@ and holds no per-request state, so it can be used from a script, a notebook or a
 test without an application context — and `tests/test_assessment.py` does
 exactly that.
 
+### How one assessment flows
+
+`POST /api/assess`, end to end. The order is deliberate: model availability is
+checked before input validation, so a broken deployment answers 503 to every
+caller rather than 400 to some of them. A full assessment makes **three** model
+calls, each scoring a batch — see [`BENCHMARKS.md`](BENCHMARKS.md) for why that
+took it from 160 ms to 33 ms.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant H as Flask hooks
+    participant V as api.assess
+    participant S as schemas
+    participant A as Assessor
+    participant M as Model pipeline
+    participant R as rules / explain
+    participant D as SQLite
+
+    C->>H: POST /api/assess (JSON or form)
+    H->>H: CSRF check, only if a session cookie is present
+    H->>V: rate limit per client IP (RATE_LIMIT_PREDICT)
+    alt no usable model bundle
+        V-->>C: 503 model_unavailable, with the reason
+    end
+    V->>S: parse(ApplicationRequest)
+    alt malformed or out of range
+        S-->>C: 400 validation_failed, errors keyed by field
+    end
+    S-->>V: validated request
+    V->>A: assess(LoanApplication)
+    A->>M: score_features(features)  call 1
+    A->>R: affordability and credit rules (configured rate)
+    A->>M: score_many(counterfactuals)  call 2, explanation
+    opt below the approval band and within the model's range
+        A->>M: score_many(candidate changes)  call 3, guidance
+    end
+    A-->>V: Assessment
+    opt signed in
+        V->>D: save payload and assessment
+    end
+    V-->>C: 200 with probability, rules, factors, guidance
+```
+
+### Train and serve: where each contract is enforced
+
+The trainer and the server import the same feature code, and the bundle
+carries everything needed to check that what was trained is what is served.
+Each of the three contracts was added after a real failure; the sections
+above describe each one.
+
+```mermaid
+flowchart LR
+    subgraph train["python -m loanapp.ml.train"]
+        CSV[("data/train.csv")] --> ROW["from_training_row"]
+        ROW --> ENG1["engineer() in features.py"]
+        ENG1 --> CAND["candidates: logistic regression, random forest"]
+        CAND --> MONO{"monotonic in loan amount?"}
+        MONO -- no --> DQ["disqualified, whatever its AUC"]
+        MONO -- yes --> CAL["sigmoid calibration, kept only if Brier improves"]
+        CAL --> BUNDLE[("loan_model.joblib")]
+    end
+
+    subgraph contents["recorded in the bundle"]
+        C1["feature_columns"]
+        C2["runtime_versions: scikit-learn, numpy"]
+        C3["metadata.annual_interest_rate"]
+    end
+    BUNDLE -.-> contents
+
+    subgraph serve["create_app()"]
+        LOAD["load_bundle()"] --> G1{"feature columns match the code?"}
+        G1 -- no --> MISMATCH["503 contract_mismatch"]
+        G1 -- yes --> G2{"same minor library versions?"}
+        G2 -- no --> MISMATCH
+        G2 -- yes --> READY["Assessor, features at the trained rate"]
+        READY --> ENG2["engineer() in features.py"]
+    end
+    BUNDLE --> LOAD
+```
+
+Anything else the loader can raise, such as a truncated pickle, degrades to
+`load_failed` rather than crashing the worker. Both states keep the rest of the
+application running and are reported on `GET /api/health`.
+
+### Deployment
+
+```mermaid
+flowchart TB
+    U["Browser or API client"] --> P["Reverse proxy, optional; set TRUSTED_PROXY"]
+    P --> G["gunicorn master"]
+    subgraph container["Container, non-root"]
+        G --> W1["worker 1"]
+        G --> W2["worker 2"]
+        G --> WN["worker N, N = WEB_CONCURRENCY"]
+        W1 & W2 & WN --> MOD["model bundle trained at image build time"]
+        HC["HEALTHCHECK, polls /api/health on PORT"] -.-> G
+    end
+    W1 & W2 & WN --> DB[("SQLite in WAL mode on the /data volume")]
+```
+
+Set `WEB_CONCURRENCY` to the CPU count: scoring is CPU-bound and holds the
+GIL, so throughput scales with processes, not threads. Each worker loads its
+own copy of the model. SQLite's single writer is the first limit to hit;
+[`DEPLOYMENT.md`](DEPLOYMENT.md) lists when to move to Postgres.
+
 ### Where validation lives, and where it does not
 
 `schemas.py` rejects input that is *malformed or impossible*: a negative loan
