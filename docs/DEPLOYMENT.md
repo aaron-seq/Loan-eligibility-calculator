@@ -346,6 +346,11 @@ Size limits with the worker count in mind.
 `static/src/tailwind.css`; regenerate it with `make css`. No Node is needed —
 the Tailwind standalone binary is installed through pip.
 
+Use `make css` rather than calling `pytailwindcss` directly. The Makefile pins
+Tailwind v3.4.19 through `TAILWINDCSS_VERSION`; without that variable the
+tool downloads the latest release — v4, a different engine that generates a
+different stylesheet from the same templates.
+
 ### A Tailwind class added to a template has no effect
 
 Same cause: the stylesheet only contains classes that were present when it
@@ -354,10 +359,21 @@ file does not match a fresh build, so this cannot reach `main` unnoticed.
 
 ### The container is unhealthy or restart-loops
 
-The healthcheck calls `http://127.0.0.1:${PORT}/api/health`. Confirm that
-`PORT` matches what the platform routes to, and check the log for a
-`ConfigError` — a configuration error exits the process, which looks like a
-crash loop from the outside. A missing model does *not* fail the healthcheck.
+Check the log for `Configuration error:` first. A configuration error stops
+gunicorn with exit status 3 and `Reason: Worker failed to boot.`, so under a
+restart policy it shows up as a restart loop (Kubernetes: `CrashLoopBackOff`).
+The fix is the variable the message names — see the
+[startup table](#the-app-exits-at-startup-with-a-configerror).
+
+If the process is up but unhealthy: the healthcheck calls
+`http://127.0.0.1:${PORT}/api/health`, so confirm that `PORT` matches what the
+platform routes to. A missing model does *not* fail the healthcheck.
+
+Before this was fixed, a configuration error exited the *worker* with status
+1, which gunicorn treats as an ordinary crash: it respawned the worker every
+two seconds indefinitely, with the master alive and the port open. The
+container looked "running" and served nothing. If you see that pattern, you
+are running an older build.
 
 ### `database is locked`
 

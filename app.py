@@ -28,7 +28,13 @@ except ConfigError as exc:
     # Refuse to start misconfigured rather than booting into a state where
     # sessions silently break. The message says exactly what to fix.
     print(f"Configuration error:\n\n  {exc}\n", file=sys.stderr)
-    raise SystemExit(1) from exc
+    # Status 3, not 1. Gunicorn halts the server only when a worker exits
+    # with 3 (its WORKER_BOOT_ERROR); any other status counts as a crash and
+    # the worker is respawned every two seconds, forever, with the master
+    # alive and the port open — a deploy that looks "running" and serves
+    # nothing. With 3 gunicorn exits and the platform reports a failed
+    # deploy. Outside gunicorn it is just a non-zero exit.
+    raise SystemExit(3) from exc
 
 
 if __name__ == "__main__":
