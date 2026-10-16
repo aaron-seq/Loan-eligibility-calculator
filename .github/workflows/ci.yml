@@ -43,6 +43,19 @@ jobs:
           ruff check loanapp tests app.py
           ruff format --check loanapp tests app.py
 
+      - name: Committed stylesheet matches the templates
+        # Tailwind only emits classes it finds in templates/, so a class added
+        # without rebuilding is silently unstyled. Rebuild and compare.
+        if: matrix.python-version == '3.13'
+        env:
+          TAILWINDCSS_VERSION: v3.4.19
+        run: |
+          python -m pytailwindcss -i static/src/tailwind.css -o /tmp/app.css --content "./templates/**/*.html" --minify
+          if ! diff -q /tmp/app.css static/css/app.css; then
+            echo "static/css/app.css is stale. Run \`make css\` and commit the result."
+            exit 1
+          fi
+
       - name: Type check
         # Strict, across the whole package. On its first run this found a
         # wrong return annotation in the trainer and a schema helper that

@@ -1,7 +1,7 @@
-{# Base layout. Tailwind is loaded from a CDN, which keeps the build toolchain
-   at zero but means the UI degrades to unstyled HTML offline. That trade is
-   noted in docs/ARCHITECTURE.md; swapping to a built stylesheet is a roadmap
-   item, not a hidden flaw. #}
+{# Base layout. Styles come from static/css/app.css, a committed Tailwind
+   build — no third-party script, works offline, and a strict
+   Content-Security-Policy is now possible. After changing any class in
+   templates/, run `make css`; CI fails if the committed output is stale. #}
 <!DOCTYPE html>
 <html lang="en" class="h-full">
 <head>
@@ -9,34 +9,35 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}LoanWise — loan eligibility guidance{% endblock %}</title>
   <meta name="description" content="Estimate your loan eligibility, understand why, and see what would improve your chances.">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    [x-cloak] { display: none; }
-    .prose-tight p { margin-bottom: .5rem; }
-  </style>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
 </head>
 <body class="h-full bg-slate-50 text-slate-800 antialiased flex flex-col">
 
+
 <header class="bg-white border-b border-slate-200">
-  <nav class="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between gap-4">
+  {# flex-wrap + whitespace-nowrap: at phone width the link row moves below the
+     logo as whole items. Without it the links were squeezed until single labels
+     broke across lines ("How / it / works") — no horizontal scroll, so a
+     scrollWidth check passed while the nav was visibly broken. #}
+  <nav class="max-w-5xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
     <a href="{{ url_for('pages.home') }}" class="font-semibold text-lg text-slate-900">
       Loan<span class="text-indigo-600">Wise</span>
     </a>
-    <div class="flex items-center gap-1 text-sm">
-      <a href="{{ url_for('pages.apply_form') }}" class="px-3 py-2 rounded-md hover:bg-slate-100">Check eligibility</a>
-      <a href="{{ url_for('pages.how_it_works') }}" class="px-3 py-2 rounded-md hover:bg-slate-100">How it works</a>
+    <div class="flex flex-wrap items-center gap-1 text-sm">
+      <a href="{{ url_for('pages.apply_form') }}" class="px-3 py-2 rounded-md whitespace-nowrap hover:bg-slate-100">Check eligibility</a>
+      <a href="{{ url_for('pages.how_it_works') }}" class="px-3 py-2 rounded-md whitespace-nowrap hover:bg-slate-100">How it works</a>
       {% if current_user %}
-        <a href="{{ url_for('pages.dashboard') }}" class="px-3 py-2 rounded-md hover:bg-slate-100">My applications</a>
+        <a href="{{ url_for('pages.dashboard') }}" class="px-3 py-2 rounded-md whitespace-nowrap hover:bg-slate-100">My applications</a>
         {% if current_user.is_admin %}
-          <a href="{{ url_for('admin.dashboard') }}" class="px-3 py-2 rounded-md hover:bg-slate-100">Admin</a>
+          <a href="{{ url_for('admin.dashboard') }}" class="px-3 py-2 rounded-md whitespace-nowrap hover:bg-slate-100">Admin</a>
         {% endif %}
         <form method="post" action="{{ url_for('auth.logout') }}" class="inline">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button class="px-3 py-2 rounded-md hover:bg-slate-100">Sign out</button>
+          <button class="px-3 py-2 rounded-md whitespace-nowrap hover:bg-slate-100">Sign out</button>
         </form>
       {% else %}
-        <a href="{{ url_for('pages.login') }}" class="px-3 py-2 rounded-md hover:bg-slate-100">Sign in</a>
-        <a href="{{ url_for('pages.signup') }}" class="px-3 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700">Create account</a>
+        <a href="{{ url_for('pages.login') }}" class="px-3 py-2 rounded-md whitespace-nowrap hover:bg-slate-100">Sign in</a>
+        <a href="{{ url_for('pages.signup') }}" class="px-3 py-2 rounded-md whitespace-nowrap bg-indigo-600 text-white hover:bg-indigo-700">Create account</a>
       {% endif %}
     </div>
   </nav>
