@@ -33,7 +33,8 @@
           <span>Estimated approval probability</span>
           <span class="text-2xl font-bold">{{ (assessment.probability * 100)|round|int }}%</span>
         </div>
-        <div class="mt-2 h-2 w-full rounded-full bg-white/70 overflow-hidden">
+        {# Decorative: the percentage is already stated as text above. #}
+        <div class="mt-2 h-2 w-full rounded-full bg-white/70 overflow-hidden" aria-hidden="true">
           <div class="h-full {{ bar }}" style="width: {{ (assessment.probability * 100)|round|int }}%"></div>
         </div>
       </div>
@@ -105,7 +106,7 @@
       <ul class="mt-4 space-y-3">
         {% for factor in assessment.factors %}
           <li class="flex gap-3">
-            <span class="mt-1 shrink-0 w-2 h-2 rounded-full
+            <span aria-hidden="true" class="mt-1 shrink-0 w-2 h-2 rounded-full
               {{ 'bg-emerald-500' if factor.direction == 'helps' else 'bg-rose-500' }}"></span>
             <div>
               <p class="text-sm font-medium text-slate-900">
@@ -147,7 +148,10 @@
             {% if rule.severity == 'pass' %}text-emerald-600
             {% elif rule.severity == 'warn' %}text-amber-600
             {% else %}text-rose-600{% endif %}">
-            {% if rule.severity == 'pass' %}✓{% elif rule.severity == 'warn' %}!{% else %}✕{% endif %}
+            {# The glyph is decoration; the word is what a screen reader says.
+               Before this it announced "multiplication x" for a failed check. #}
+            <span aria-hidden="true">{% if rule.severity == 'pass' %}✓{% elif rule.severity == 'warn' %}!{% else %}✕{% endif %}</span>
+            <span class="sr-only">{% if rule.severity == 'pass' %}Passed:{% elif rule.severity == 'warn' %}Warning:{% else %}Failed:{% endif %}</span>
           </span>
           <div>
             <p class="text-sm font-medium text-slate-900">{{ rule.title }}</p>

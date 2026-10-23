@@ -374,3 +374,131 @@ class TestReviewRegressions:
         monkeypatch.setenv("SECRET_KEY", "k" * 40)
         monkeypatch.setenv("SESSION_COOKIE_SAMESITE", "strict")
         assert load_config("development").cookie_samesite == "Strict"
+
+
+class TestAuthenticatedUser:
+    def test_raises_a_clear_error_when_no_one_is_signed_in(self, app):
+        """A view that forgets @login_required should fail at the access check,
+        not as `'NoneType' object is not subscriptable` somewhere downstream."""
+        from loanapp.security import authenticated_user
+
+        with (
+            app.test_request_context("/"),
+            pytest.raises(RuntimeError, match="login_required"),
+        ):
+            authenticated_user()
+
+    def test_returns_the_user_when_signed_in(self, registered_client, app):
+        response = registered_client.get("/api/applications")
+        assert response.status_code == 200  # the view resolved the user
+
+
+class TestRateLimitConfig:
+    """Limits were hardcoded. Behind a corporate NAT an entire office shares one
+    IP, so 30 assessments an hour locked everyone out with no operator lever."""
+
+    def test_defaults_are_unchanged(self, monkeypatch):
+        from loanapp.config import load_config
+
+        monkeypatch.setenv("SECRET_KEY", "k" * 40)
+        for name in ("RATE_LIMIT_LOGIN", "RATE_LIMIT_REGISTER", "RATE_LIMIT_PREDICT"):
+            monkeypatch.delenv(name, raising=False)
+        config = load_config("development")
+        assert config.login_rate_limit == (10, 300)
+        assert config.register_rate_limit == (5, 3600)
+        assert config.predict_rate_limit == (30, 3600)
+
+    def test_each_limit_is_configurable(self, monkeypatch):
+        from loanapp.config import load_config
+
+        monkeypatch.setenv("SECRET_KEY", "k" * 40)
+        monkeypatch.setenv("RATE_LIMIT_PREDICT", "500/60")
+        monkeypatch.setenv("RATE_LIMIT_LOGIN", "20/600")
+        config = load_config("development")
+        assert config.predict_rate_limit == (500, 60)
+        assert config.login_rate_limit == (20, 600)
+
+    @pytest.mark.parametrize(
+        "value", ["30", "30/", "/60", "abc/60", "30/xyz", "0/60", "30/0", "-1/60"]
+    )
+    def test_malformed_limits_fail_at_startup(self, monkeypatch, value):
+        """A typo must not silently disable rate limiting."""
+        from loanapp.config import ConfigError, load_config
+
+        monkeypatch.setenv("SECRET_KEY", "k" * 40)
+        monkeypatch.setenv("RATE_LIMIT_PREDICT", value)
+        with pytest.raises(ConfigError, match="RATE_LIMIT_PREDICT"):
+            load_config("development")
+
+
+class TestProxyAndBooleanConfig:
+    """``TRUSTED_PROXY`` was read with ``bool(os.environ.get(...))``, so
+    ``TRUSTED_PROXY=false`` or ``=0`` *enabled* trust in X-Forwarded-For — the
+    spoofable header the limiter otherwise ignores. ``TRUSTED_PROXY_DEPTH`` was
+    documented but never read from the environment at all."""
+
+    def _app(self, tmp_path, monkeypatch, **env):
+        from loanapp import create_app
+        from loanapp.config import load_config
+
+        monkeypatch.setenv("SECRET_KEY", "k" * 40)
+        monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "t.db"))
+        monkeypatch.setenv("MODEL_DIR", str(tmp_path))
+        for name in ("TRUSTED_PROXY", "TRUSTED_PROXY_DEPTH"):
+            monkeypatch.delenv(name, raising=False)
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        return create_app(load_config("testing"))
+
+    @pytest.mark.parametrize("value", ["false", "False", "0", "no", "off", ""])
+    def test_a_false_value_does_not_trust_forwarded_for(
+        self, tmp_path, monkeypatch, value
+    ):
+        from loanapp.security import client_identifier
+
+        app = self._app(tmp_path, monkeypatch, TRUSTED_PROXY=value)
+        assert app.config["TRUSTED_PROXY"] is False
+        with app.test_request_context(
+            "/",
+            headers={"X-Forwarded-For": "9.9.9.9"},
+            environ_base={"REMOTE_ADDR": "1.2.3.4"},
+        ):
+            assert client_identifier() == "1.2.3.4"
+
+    @pytest.mark.parametrize("value", ["1", "true", "TRUE", "yes", "on"])
+    def test_a_true_value_trusts_forwarded_for(self, tmp_path, monkeypatch, value):
+        app = self._app(tmp_path, monkeypatch, TRUSTED_PROXY=value)
+        assert app.config["TRUSTED_PROXY"] is True
+
+    def test_unset_means_untrusted(self, tmp_path, monkeypatch):
+        assert self._app(tmp_path, monkeypatch).config["TRUSTED_PROXY"] is False
+
+    def test_depth_is_read_from_the_environment(self, tmp_path, monkeypatch):
+        from loanapp.security import client_identifier
+
+        app = self._app(tmp_path, monkeypatch, TRUSTED_PROXY="1", TRUSTED_PROXY_DEPTH="2")
+        with app.test_request_context(
+            "/", headers={"X-Forwarded-For": "6.6.6.6, 7.7.7.7, 8.8.8.8"}
+        ):
+            assert client_identifier() == "7.7.7.7"
+
+    @pytest.mark.parametrize("value", ["0", "-1", "two"])
+    def test_invalid_depth_fails_at_startup(self, monkeypatch, value):
+        from loanapp.config import ConfigError, load_config
+
+        monkeypatch.setenv("SECRET_KEY", "k" * 40)
+        monkeypatch.setenv("TRUSTED_PROXY_DEPTH", value)
+        with pytest.raises(ConfigError, match="TRUSTED_PROXY_DEPTH"):
+            load_config("development")
+
+    @pytest.mark.parametrize("name", ["TRUSTED_PROXY", "SESSION_COOKIE_SECURE"])
+    @pytest.mark.parametrize("value", ["ture", "flase", "y", "enabled"])
+    def test_an_unrecognised_boolean_fails_at_startup(self, monkeypatch, name, value):
+        """Unrecognised used to mean False. For SESSION_COOKIE_SECURE that is
+        fail-open: a typo of "true" sent the session cookie over plain HTTP."""
+        from loanapp.config import ConfigError, load_config
+
+        monkeypatch.setenv("SECRET_KEY", "k" * 40)
+        monkeypatch.setenv(name, value)
+        with pytest.raises(ConfigError, match=name):
+            load_config("development")

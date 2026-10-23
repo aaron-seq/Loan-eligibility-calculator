@@ -13,7 +13,7 @@ overrides the model probability; the combined view is assembled in
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 from .config import Config
 from .features import LoanApplication, monthly_instalment
@@ -41,7 +41,7 @@ class Affordability:
     max_affordable_loan: float
     annual_interest_rate: float
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "monthly_instalment": round(self.monthly_instalment, 2),
             "total_income": round(self.total_income, 2),

@@ -27,9 +27,9 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -40,8 +40,27 @@ jobs:
 
       - name: Lint
         run: |
-          ruff check loanapp tests app.py
-          ruff format --check loanapp tests app.py
+          ruff check loanapp tests scripts app.py
+          ruff format --check loanapp tests scripts app.py
+
+      - name: Committed stylesheet matches the templates
+        # Tailwind only emits classes it finds in templates/, so a class added
+        # without rebuilding is silently unstyled. Rebuild and compare.
+        if: matrix.python-version == '3.13'
+        env:
+          TAILWINDCSS_VERSION: v3.4.19
+        run: |
+          python -m pytailwindcss -i static/src/tailwind.css -o /tmp/app.css --content "./templates/**/*.html" --minify
+          if ! diff -q /tmp/app.css static/css/app.css; then
+            echo "static/css/app.css is stale. Run \`make css\` and commit the result."
+            exit 1
+          fi
+
+      - name: Type check
+        # Strict, across the whole package. On its first run this found a
+        # wrong return annotation in the trainer and a schema helper that
+        # erased the concrete type at every call site.
+        run: mypy
 
       - name: Test
         run: pytest --cov=loanapp --cov-report=term-missing
@@ -49,9 +68,9 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -69,15 +88,42 @@ jobs:
       - name: Static security scan
         run: bandit -r loanapp app.py -ll
 
+  accessibility:
+    # axe-core in real Chromium, against the real stylesheet. The audit guards
+    # its own validity: if the stylesheet fails to load, test_styles_are_loaded
+    # fails rather than letting every contrast check pass on unstyled HTML.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Audit
+        # A11Y_REQUIRED turns "cannot run" into a failure. Without it a broken
+        # browser install would skip every test and this job would pass green.
+        env:
+          A11Y_REQUIRED: "1"
+        run: pytest -m a11y -rs
+
   train:
     # Training is the part most likely to break silently: it is the only thing
     # that proves the committed bundle still matches the contracts in the code,
     # and that the model card's numbers can be reproduced.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip

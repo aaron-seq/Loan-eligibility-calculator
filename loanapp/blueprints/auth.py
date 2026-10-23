@@ -8,6 +8,7 @@ drift apart in what they accept.
 from __future__ import annotations
 
 import sqlite3
+from typing import Any
 
 from flask import (
     Blueprint,
@@ -19,6 +20,7 @@ from flask import (
     session,
     url_for,
 )
+from flask.typing import ResponseReturnValue
 
 from ..schemas import LoginRequest, RegistrationRequest, SchemaError, parse
 from ..security import (
@@ -36,7 +38,9 @@ auth_bp = Blueprint("auth", __name__)
 INVALID_CREDENTIALS = "Incorrect username or password."
 
 
-def _respond(success: bool, message: str, status: int, destination: str, **extra):
+def _respond(
+    success: bool, message: str, status: int, destination: str, **extra: Any
+) -> ResponseReturnValue:
     """Render one outcome for either a JSON client or a browser.
 
     The parameter is ``destination`` rather than ``redirect_to`` because
@@ -50,13 +54,13 @@ def _respond(success: bool, message: str, status: int, destination: str, **extra
     return redirect(destination)
 
 
-def _payload() -> dict:
+def _payload() -> dict[str, Any]:
     return request.get_json(silent=True) or request.form.to_dict()
 
 
 @auth_bp.post("/register")
 @rate_limit("register")
-def register():
+def register() -> ResponseReturnValue:
     try:
         data = parse(RegistrationRequest, _payload())
     except SchemaError as exc:
@@ -98,7 +102,7 @@ def register():
 
 @auth_bp.post("/login")
 @rate_limit("login")
-def login():
+def login() -> ResponseReturnValue:
     try:
         data = parse(LoginRequest, _payload())
     except SchemaError:
@@ -123,6 +127,6 @@ def login():
 
 
 @auth_bp.post("/logout")
-def logout():
+def logout() -> ResponseReturnValue:
     session.clear()
     return _respond(True, "Signed out.", 200, url_for("pages.home"))

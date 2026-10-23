@@ -143,8 +143,15 @@ def candidate_pipelines() -> dict[str, Pipeline]:
     }
 
 
-def cross_validate(pipeline: Pipeline, X: pd.DataFrame, y: pd.Series) -> dict[str, float]:
-    """Repeated stratified CV. We report the spread, not just the mean."""
+def cross_validate(
+    pipeline: Pipeline, X: pd.DataFrame, y: pd.Series[int]
+) -> dict[str, Any]:
+    """Repeated stratified CV. We report the spread, not just the mean.
+
+    Returns ``dict[str, Any]``, not ``dict[str, float]`` as it was annotated:
+    ``roc_auc_ci95`` is a two-element list. The old annotation was simply
+    wrong, and the type checker was the first thing to notice.
+    """
     cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=4, random_state=RANDOM_STATE)
     auc = cross_val_score(pipeline, X, y, cv=cv, scoring="roc_auc", n_jobs=-1)
     acc = cross_val_score(pipeline, X, y, cv=cv, scoring="accuracy", n_jobs=-1)
@@ -230,7 +237,12 @@ def fairness_audit(
             continue
         groups: dict[str, Any] = {}
         for value, idx in raw_holdout.groupby(column).groups.items():
-            positions = [raw_holdout.index.get_loc(i) for i in idx]
+            # get_indexer returns integer positions. The previous
+            # [index.get_loc(i) ...] form was typed as int | slice | mask,
+            # because get_loc returns a slice or boolean mask on a
+            # non-unique index — correct here only because the caller had
+            # reset the index first.
+            positions = raw_holdout.index.get_indexer(idx)
             if len(positions) < 10:  # too few to say anything meaningful
                 continue
             groups[str(value)] = {
@@ -359,7 +371,7 @@ def monotonicity_check(pipeline: Pipeline, annual_rate: float) -> dict[str, Any]
     }
 
 
-def compute_baselines(applications: list) -> dict[str, Any]:
+def compute_baselines(applications: list[LoanApplication]) -> dict[str, Any]:
     """Reference value per *input*, used by the explainer.
 
     Baselines are computed over applicant-visible inputs rather than engineered
@@ -403,7 +415,7 @@ def train(
 
     # 1. Select a model on cross-validated ROC-AUC over the training split
     #    only. The holdout is never used for selection.
-    cv_results: dict[str, dict[str, float]] = {}
+    cv_results: dict[str, dict[str, Any]] = {}
     for name, pipeline in candidate_pipelines().items():
         cv_results[name] = cross_validate(pipeline, X_train, y_train)
         print(

@@ -3,6 +3,15 @@
 pytest==9.1.1
 pytest-cov==7.1.0
 ruff==0.17.0
+mypy==2.4.0
+# Fetches Tailwind's standalone binary, so styles build without Node.
+pytailwindcss==0.4.2
+
+# Accessibility audit (tests/test_a11y.py). axe-playwright-python bundles
+# axe-core, so this needs a browser but no Node. Tests skip without one.
+playwright==1.64.0
+axe-playwright-python==0.1.8
+pandas-stubs==3.0.5.260914
 
 # Security tooling, run in CI. pip-audit checks the dependency tree against
 # the PyPI advisory database; bandit is a static scan of our own code.

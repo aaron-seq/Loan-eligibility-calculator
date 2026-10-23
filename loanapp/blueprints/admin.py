@@ -12,6 +12,7 @@ account and no default password.
 from __future__ import annotations
 
 from flask import Blueprint, current_app, jsonify, render_template
+from flask.typing import ResponseReturnValue
 
 from ..security import admin_required, json_endpoint
 
@@ -20,7 +21,7 @@ admin_bp = Blueprint("admin", __name__)
 
 @admin_bp.get("/")
 @admin_required
-def dashboard():
+def dashboard() -> ResponseReturnValue:
     repository = current_app.extensions["application_repository"]
     return render_template(
         "admin/dashboard.html",
@@ -35,7 +36,7 @@ def dashboard():
 @admin_bp.get("/stats")
 @json_endpoint
 @admin_required
-def stats():
+def stats() -> ResponseReturnValue:
     """Aggregates as JSON, for dashboards or monitoring.
 
     Counts and rates only — no per-applicant rows, so this can be scraped

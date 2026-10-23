@@ -1,0 +1,12 @@
+/*
+ * Source for static/css/app.css. Rebuild with `make css` after changing any
+ * Tailwind class in templates/ — CI fails if the committed output is stale.
+ *
+ * Built from the standalone Tailwind CLI (v3.4.19, the official v3-lts line)
+ * via pytailwindcss, so no Node toolchain is needed. v3 rather than v4
+ * because the templates were written against the v3 CDN; see
+ * docs/ARCHITECTURE.md.
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

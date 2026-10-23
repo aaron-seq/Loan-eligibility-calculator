@@ -20,11 +20,22 @@ reasoning is below.
 | `FLASK_ENV` | yes | `production` \| `development` \| `testing` |
 | `DATABASE_PATH` | no | Defaults to `./loanwise.db`, or `/tmp/loanwise.db` on serverless |
 | `MODEL_DIR` | no | Defaults to `./models` |
-| `TRUSTED_PROXY` | only behind a proxy | Makes rate limiting trust `X-Forwarded-For` |
-| `SESSION_COOKIE_SECURE` | no | Defaults to true in production |
-| — | — | Requires Python >= 3.11 (set by numpy/pandas/scikit-learn) |
-| `ANNUAL_INTEREST_RATE` | no | Fraction, e.g. `0.105`. Affordability reference rate. |
+| `TRUSTED_PROXY` | only behind a proxy | Boolean. Makes rate limiting trust `X-Forwarded-For` |
+| `TRUSTED_PROXY_DEPTH` | no | Proxies in front of the app, default `1`. Read the client IP this many hops from the right of `X-Forwarded-For` |
+| `WEB_CONCURRENCY` | no | gunicorn worker processes (Docker default 2). **Set to the CPU count**: throughput scales linearly with processes, not threads — see [`BENCHMARKS.md`](BENCHMARKS.md) |
+| `RATE_LIMIT_PREDICT` | no | `<requests>/<seconds>`, default `30/3600`. Raise it if many users share one IP (corporate NAT) |
+| `RATE_LIMIT_LOGIN` / `RATE_LIMIT_REGISTER` | no | Same format; defaults `10/300` and `5/3600`. A malformed value stops the app from starting |
+| `SESSION_COOKIE_SECURE` | no | Boolean. Defaults to true in production |
+| `ANNUAL_INTEREST_RATE` | no | Fraction, e.g. `0.105`. Affordability reference rate; does not change the model's estimate — see [Troubleshooting](#changing-annual_interest_rate-does-not-move-the-probability) |
 | `APPROVE_THRESHOLD` / `BORDERLINE_THRESHOLD` | no | Decision bands, `0 < borderline < approve < 1` |
+
+Booleans accept `true`/`false`, `1`/`0`, `yes`/`no` or `on`/`off`, in any case.
+Anything else stops the app at startup. Unrecognised values used to be
+treated as false, so `SESSION_COOKIE_SECURE=ture` quietly sent the session
+cookie over plain HTTP, and `TRUSTED_PROXY=false` — read as "any non-empty
+string" — *enabled* trust in the spoofable header.
+
+Requires Python 3.11 or newer; numpy, pandas and scikit-learn set that floor.
 
 Generate a secret key:
 
@@ -45,6 +56,7 @@ miserable to diagnose. Failing at boot with a message is better.
 docker build -t loanwise .
 
 docker run -d --name loanwise -p 8000:8000 \
+  -e WEB_CONCURRENCY="$(nproc)" \
   -e SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" \
   -e FLASK_ENV=production \
   -v loanwise-data:/data \
@@ -188,15 +200,19 @@ model availability.
 | `ready` | Serving normally | — |
 | `unavailable` | No bundle found | Run the trainer, redeploy |
 | `contract_mismatch` | Bundle disagrees with the code | **Deployment error.** Retrain and redeploy. |
+| `load_failed` | Bundle exists but cannot be read — corrupt, truncated or unreadable | Retrain and redeploy; check file permissions |
 
-`contract_mismatch` covers two cases, and the error in the startup log says
-which:
+Whenever the model is not `ready`, the response carries a `model_error` field
+with the same text as the startup log, so you can diagnose without shell
+access.
+
+`contract_mismatch` covers two cases, and `model_error` says which:
 
 - **Feature mismatch** — code whose `FEATURE_COLUMNS` differ from the deployed
-  bundle's.
+  bundle's. The message lists both column sets.
 - **Library mismatch** — the bundle was pickled under a different minor version
-  of scikit-learn or numpy. `GET /api/health` publishes the bundle's
-  `runtime_versions` so you can compare without shell access.
+  of scikit-learn or numpy. The message names the bundle's versions and the
+  running ones; a healthy response publishes them as `model.runtime_versions`.
 
 Either way the app refuses to serve rather than scoring a mis-aligned vector or
 calling into an incompatible pickle. Both are fixed the same way: retrain
@@ -240,17 +256,146 @@ drift for exactly that reason.
 ### Backups
 
 ```bash
-docker exec loanwise sqlite3 /data/loanwise.db ".backup '/data/backup.db'"
+docker exec loanwise python -c "import sqlite3; src = sqlite3.connect('/data/loanwise.db'); dst = sqlite3.connect('/data/backup.db'); src.backup(dst); dst.close()"
 docker cp loanwise:/data/backup.db ./backup-$(date +%F).db
 ```
 
-Use `.backup`, not a file copy — the database runs in WAL mode and a naive copy
-can capture a torn state.
+Use SQLite's backup API, not a file copy — the database runs in WAL mode and a
+naive copy can capture a torn state. It goes through Python because the slim
+base image does not ship the `sqlite3` command-line tool.
 
 ### Scaling
 
-One container handles this workload comfortably; scoring a calibrated linear
-model is sub-millisecond and the model is loaded once per worker.
+Scale up before scaling out. A full assessment costs about 33 ms of CPU and
+holds the GIL, so throughput tracks worker *processes*: on 4 CPUs, measured
+20.9 / 41.2 / 86.3 req/s at 1 / 2 / 4 workers ([`BENCHMARKS.md`](BENCHMARKS.md)).
+Set `WEB_CONCURRENCY` to the CPU count and give the container more CPUs before
+anything else. Each worker loads its own copy of the model.
 
 Before adding instances, move to Postgres. SQLite has a single writer, and two
 instances pointed at the same volume will produce lock contention.
+
+---
+
+## Troubleshooting
+
+Each entry is a failure this project has actually hit or been designed
+against: the symptom you see, why it happens, and the fix.
+
+### The app exits at startup with a `ConfigError`
+
+Configuration is validated at boot, deliberately, so a bad value fails once
+and loudly instead of on some later request. The message names the variable:
+
+| Message begins | Fix |
+|---|---|
+| `SECRET_KEY is required in production` | Set `SECRET_KEY`; the message prints a command that generates one |
+| `SECRET_KEY must be at least 32 characters` | Generate a longer key |
+| `FLASK_ENV must be production, development or testing` | Fix the spelling |
+| `RATE_LIMIT_… must be <requests>/<seconds>` | Use the form `30/3600`; both numbers positive |
+| `… must be true or false` | Use one of the boolean spellings [above](#required-configuration) |
+| `TRUSTED_PROXY_DEPTH counts proxies…` | Use 1 or more |
+| `SESSION_COOKIE_SAMESITE must be Lax, Strict or None` | Fix the spelling |
+| `SESSION_COOKIE_SAMESITE=None requires SESSION_COOKIE_SECURE=true` | Set both, or use `Lax` |
+| `Require 0 < BORDERLINE_THRESHOLD < APPROVE_THRESHOLD < 1` | Thresholds are fractions, borderline below approve |
+| `ANNUAL_INTEREST_RATE is a fraction` | Write `0.105`, not `10.5` |
+
+### `/api/health` says `degraded`, and assessments return 503
+
+Read `model_status` and `model_error` in the same response — see
+[Health](#health). Every case is fixed by producing a bundle under the
+libraries you are running: `make train`, commit `models/`, redeploy.
+
+The Docker image trains during the build, against the exact libraries it
+ships, so a `contract_mismatch` should be impossible inside it. If you see
+one, something is replacing the built bundle — most likely a volume mounted
+over `MODEL_DIR` that holds an older one.
+
+### A setting in `.env` is ignored
+
+A real environment variable of the same name wins over `.env`, by design: a
+stray file must never replace a production secret. Check what the process
+actually sees (`docker exec loanwise env`, or your platform's settings). Also
+check the location: the file is read from next to `app.py`, not from the
+current directory. `.dockerignore` keeps it out of the image, so containers
+never read one.
+
+### Users are randomly signed out
+
+`SECRET_KEY` is unset in development, so every worker generated its own
+ephemeral key and a session signed by one worker is rejected by the next. The
+startup log says so. Set `SECRET_KEY`. Production refuses to start without it.
+
+### A whole office gets 429 Too Many Requests
+
+Everyone behind one NAT shares one IP, and the default is 30 assessments per
+hour per IP. Raise `RATE_LIMIT_PREDICT`. If the app sits behind your own
+reverse proxy, also set `TRUSTED_PROXY=true` — otherwise every request
+appears to come from the proxy and *all* users share a single bucket.
+
+### Rate limits seem several times too lenient
+
+The limiter is per process, so N workers allow roughly N times the configured
+limit. That is a known limitation, tracked in
+[#18](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/18).
+Size limits with the worker count in mind.
+
+### Pages render unstyled
+
+`static/css/app.css` is missing or out of date. It is a committed build of
+`static/src/tailwind.css`; regenerate it with `make css`. No Node is needed —
+the Tailwind standalone binary is installed through pip.
+
+Use `make css` rather than calling `pytailwindcss` directly. The Makefile pins
+Tailwind v3.4.19 through `TAILWINDCSS_VERSION`; without that variable the
+tool downloads the latest release — v4, a different engine that generates a
+different stylesheet from the same templates.
+
+### A Tailwind class added to a template has no effect
+
+Same cause: the stylesheet only contains classes that were present when it
+was built. Run `make css` and commit the result. CI fails if the committed
+file does not match a fresh build, so this cannot reach `main` unnoticed.
+
+### The container is unhealthy or restart-loops
+
+Check the log for `Configuration error:` first. A configuration error stops
+gunicorn with exit status 3 and `Reason: Worker failed to boot.`, so under a
+restart policy it shows up as a restart loop (Kubernetes: `CrashLoopBackOff`).
+The fix is the variable the message names — see the
+[startup table](#the-app-exits-at-startup-with-a-configerror).
+
+If the process is up but unhealthy: the healthcheck calls
+`http://127.0.0.1:${PORT}/api/health`, so confirm that `PORT` matches what the
+platform routes to. A missing model does *not* fail the healthcheck.
+
+Before this was fixed, a configuration error exited the *worker* with status
+1, which gunicorn treats as an ordinary crash: it respawned the worker every
+two seconds indefinitely, with the master alive and the port open. The
+container looked "running" and served nothing. If you see that pattern, you
+are running an older build.
+
+### `database is locked`
+
+SQLite allows one writer at a time, and each connection waits up to 30
+seconds for its turn, so seeing this at all means real contention. The usual
+causes are two instances sharing one database file, or a database on a
+network filesystem (NFS, SMB, some cloud volumes), where WAL mode does not
+work. Use a local volume and a single instance, or move to Postgres — see
+[Postgres migration](#postgres-migration).
+
+### Changing `ANNUAL_INTEREST_RATE` does not move the probability
+
+By design. The model was trained on features computed at a specific rate,
+recorded in the bundle, and it always scores at that rate. Feeding it
+features computed at a different rate would shift its inputs away from what
+it learned. The setting does change the affordability panel and the EMI
+rules, which are formulas rather than learned parameters. To change the
+model's rate, retrain.
+
+### The accessibility tests are all skipped
+
+They need a Chromium that Playwright can drive. Run
+`playwright install chromium`, or point `PLAYWRIGHT_CHROMIUM_EXECUTABLE` at
+an existing binary. CI sets `A11Y_REQUIRED=1`, which turns a skip into a
+failure, so the audit cannot pass by not running.

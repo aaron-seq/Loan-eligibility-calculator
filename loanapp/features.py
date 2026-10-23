@@ -225,7 +225,7 @@ def build_feature_frame(
     return pd.DataFrame(rows, columns=list(FEATURE_COLUMNS))
 
 
-def from_training_row(row: Mapping[str, Any]) -> LoanApplication:
+def from_training_row(row: Mapping[str, Any] | pd.Series[Any]) -> LoanApplication:
     """Map one row of ``data/train.csv`` onto :class:`LoanApplication`.
 
     Missing values are left for the pipeline's imputer wherever possible; the
