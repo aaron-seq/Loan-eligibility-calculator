@@ -13,6 +13,7 @@ explained to the applicant rather than rejected as a 400.
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from typing import Any, Literal, TypeVar
 
 from pydantic import (
@@ -59,8 +60,10 @@ def parse(model: type[ModelT], payload: Any) -> ModelT:
     return a bare ``BaseModel``, which meant ``data.user_id`` was unchecked at
     every call site and a mistyped field name was a runtime ``AttributeError``.
     """
+    if not isinstance(payload, Mapping):
+        raise SchemaError({"_": "Request body must be an object"})
     try:
-        return model.model_validate(dict(payload or {}))
+        return model.model_validate(dict(payload))
     except ValidationError as exc:
         raise SchemaError(_flatten(exc)) from exc
 
