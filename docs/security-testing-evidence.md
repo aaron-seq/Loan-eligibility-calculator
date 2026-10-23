@@ -140,15 +140,24 @@ packages lack an SPDX expression in metadata. This is an inventory check, not a
 complete transitive attribution or legal review; no dependencies were added.
 Hosted Dependabot/secret/code-scanning responses are recorded in #43 as gaps,
 not clean scanner results. Local Docker has no running daemon; Linux container,
-Unix startup and Python 3.11/3.12 verification depend on current-head hosted CI.
+Unix startup and Python 3.11/3.12 verification use hosted CI. The personally
+inspected [run for 074eb2a](https://github.com/aaron-seq/Loan-eligibility-calculator/actions/runs/39947629236)
+passed all seven jobs. Its Python 3.13 job reports 318 passed/15 browser skips;
+the dedicated browser job reports 15 passed (13 page states plus stylesheet/CSP
+guards). The container job built the image and verified non-root execution,
+custom-port health and account persistence after replacement. These published
+results apply to that head; later assertion/documentation changes require their
+own CI run, recorded on the PR.
 
 ## Checkpoint and resume
 
-Checkpoint: 2026-10-23 17:08 Asia/Kolkata (11:38 UTC). Branch
-`codex/39-assessment-integrity`, based on `fcdad2d`; implementation/tests/docs
-were local and uncommitted at this checkpoint. The delivery PR records the final
-head and CI links. No merge, release, advisory publication or deployment is
-included in this bounded delivery authorization.
+Checkpoint: 2026-10-23 17:20 Asia/Kolkata (11:50 UTC). Branch
+`codex/39-assessment-integrity`, based on `fcdad2d`;
+[draft PR #44](https://github.com/aaron-seq/Loan-eligibility-calculator/pull/44)
+contains the implementation and records the current head/check results.
+Follow-up assertions explicitly check no-store on saved HTML, redirects and
+error responses. Their targeted tests pass. No merge, release, advisory
+publication or deployment is included in this bounded delivery authorization.
 
 The [private Project](https://github.com/users/aaron-seq/projects/5) is linked to
 the repository. #39/#41/#42 are In Progress for the milestone; #43 is Todo/P2.

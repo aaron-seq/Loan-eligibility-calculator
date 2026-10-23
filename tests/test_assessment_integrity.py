@@ -56,6 +56,7 @@ def test_unsupported_saved_result_stays_unavailable_in_every_owner_view(
     for path in ("/dashboard", f"/applications/{record_id}"):
         page = registered_client.get(path)
         assert page.status_code == 200
+        assert page.headers["Cache-Control"] == "no-store"
         assert b"Estimate unavailable" in page.data
         assert b"20%" not in page.data
     assert b"Monthly instalment" in page.data
