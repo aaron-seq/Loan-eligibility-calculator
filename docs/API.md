@@ -77,6 +77,10 @@ plain currency and converts internally. The old form asked users to pre-divide b
 
 ### Response
 
+The response below is illustrative, abbreviated, and is not a captured
+measurement. The checked-in [sample input](../examples/application.json) and
+[review evidence](engineering-evidence.md) provide a reproduced example.
+
 ```json
 {
   "data": {
@@ -144,6 +148,17 @@ Field notes:
   Each `projected_probability` is a real re-score, not an estimate. At most one
   "borrow less" option is offered: the smallest reduction that clears the band.
 - **`application_id`** — present only when `saved` is true.
+
+### Out-of-range applications
+
+`POST /api/assess` includes `out_of_range` and `out_of_range_reason`.
+An application with no household income, or an implausible loan/instalment
+ratio, has no supported probability. The browser hides its percentage.
+The current JSON contract retains a numeric `probability` and model band;
+clients must ignore those values when `out_of_range` is true and show the
+rules and reason instead. `/api/compare` currently has no equivalent flag;
+do not treat its ranking of extreme inputs as supported model guidance.
+This validation gap is tracked in [#39](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/39).
 
 ---
 

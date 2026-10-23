@@ -1,8 +1,8 @@
 # Roadmap
 
-Work that would genuinely improve the project, in the order I would do it.
-Everything here is deliberately *not* done, with the reason stated — this is a
-list of known gaps, not a wish list.
+Remaining work, ordered by the existing roadmap. The [2026-10-23 review](engineering-evidence.md)
+records evidence and dispositions for every open issue and PR. An implemented
+change on a review branch is not evidence that it has reached the default branch.
 
 Each item is tracked as a GitHub issue; the number links to it.
 
@@ -12,22 +12,19 @@ These are real and documented in code. None is hidden.
 
 | Limitation | Impact | Where it is stated |
 |---|---|---|
-| Rate-limit counters are per process | N workers permit ~N× the limit | [#18](../../issues/18) |
-| 614 training rows | Wide error bars on every metric | [#20](../../issues/20) |
-| Attribution ignores interactions | Factors do not sum to the total | [#25](../../issues/25) |
-| SQLite single-writer | Blocks horizontal scale | [#24](../../issues/24) |
-| Tailwind from CDN | Unstyled offline | [#30](../../issues/30) |
+| Rate-limit counters are per process | N workers permit ~N× the limit | [#18](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/18) |
+| 614 training rows | Wide error bars on every metric | [#20](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/20) |
+| Attribution ignores interactions | Factors do not sum to the total | [#25](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/25) |
+| SQLite single-writer | Blocks horizontal scale | [#24](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/24) |
 | Exact dependency pins | Upgrades are manual | `requirements.txt`; weekly `pip-audit` in CI |
-| No Content-Security-Policy | Inline scripts in templates | [#30](../../issues/30) |
-| No type checking | A class of error the tests miss | [#27](../../issues/27) |
-| No password reset | A locked-out user needs an operator | [#17](../../issues/17) |
-| No email verification | Addresses are unverified | [#17](../../issues/17) |
+| No password reset | A locked-out user needs an operator | [#17](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/17) |
+| No email verification | Addresses are unverified | [#17](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/17) |
 
 ---
 
 ## Next (highest value per unit of work)
 
-### 1. Password reset and email verification ([#17](../../issues/17))
+### 1. Password reset and email verification ([#17](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/17))
 
 The most obvious gap in the account system. Registration accepts any address
 without verifying it, and there is no way back in after a forgotten password.
@@ -37,7 +34,7 @@ and rate limiting on the reset endpoint. Deliberately deferred: it is the first
 thing that requires infrastructure beyond a container, and every other feature
 was reachable without it.
 
-### 2. Shared-store rate limiting ([#18](../../issues/18))
+### 2. Shared-store rate limiting ([#18](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/18))
 
 Move `RateLimiter` behind Redis. The interface in `security.py` is already the
 one a Redis backend would implement, so this is a backend swap plus a config
@@ -46,13 +43,13 @@ option, not a redesign.
 Worth doing as soon as a deployment runs more than one worker in an environment
 that attracts real traffic.
 
-### 3. A scenario-comparison UI ([#19](../../issues/19))
+### 3. A scenario-comparison UI ([#19](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/19))
 
 `POST /api/compare` exists, is tested, and has no interface. A side-by-side view
 — "what if I borrow less versus stretch the term" — is the most useful thing
 still missing from the applicant experience, and the backend is already done.
 
-### 4. Postgres support ([#24](../../issues/24))
+### 4. Postgres support ([#24](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/24))
 
 See `docs/DEPLOYMENT.md` for the migration triggers. Contained to
 `loanapp/db.py`; the domain and HTTP layers do not touch SQL.
@@ -61,7 +58,7 @@ See `docs/DEPLOYMENT.md` for the migration triggers. Contained to
 
 ## Model quality
 
-### 5. Shapley values for attribution ([#25](../../issues/25))
+### 5. Shapley values for attribution ([#25](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/25))
 
 The current one-at-a-time ablation is exact, cheap and honest, but it misses
 interactions. `shap.KernelExplainer` over the calibrated pipeline would capture
@@ -72,7 +69,7 @@ cache, and increases per-request latency by roughly an order of magnitude for
 what is a refinement rather than a fix. The current method's limits are stated
 plainly rather than obscured, which is the acceptable interim.
 
-### 6. A better dataset ([#20](../../issues/20))
+### 6. A better dataset ([#20](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/20))
 
 This is the single largest constraint on the whole project. 614 rows with a
 0.73 cross-validated ROC-AUC and ±0.054 fold-to-fold spread cannot support
@@ -88,7 +85,7 @@ gradient boosting, isotonic instead of sigmoid calibration, per-segment
 calibration, and a genuine default-risk model rather than an approval-mimicking
 one.
 
-### 7. Predict risk, not approvals ([#21](../../issues/21))
+### 7. Predict risk, not approvals ([#21](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/21))
 
 The model currently learns *"would a lender have approved this?"* — which
 reproduces historical lender behaviour, including its biases. The more useful
@@ -97,7 +94,7 @@ and more defensible target is *"would this loan be repaid?"*.
 That needs outcome data (item 6). It would let the tool tell an applicant
 something a lender's approval pattern cannot: whether the loan is a good idea.
 
-### 8. Drift monitoring ([#26](../../issues/26))
+### 8. Drift monitoring ([#26](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/26))
 
 `/admin/stats` shows the outcome mix, which surfaces gross shifts. Proper
 monitoring would compare the live input distribution against the training
@@ -109,12 +106,12 @@ Cheap to add once there is enough traffic for the signal to be meaningful.
 
 ## Product
 
-### 9. Export an assessment ([#28](../../issues/28))
+### 9. Export an assessment ([#28](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/28))
 
 PDF or a shareable link, so an applicant can take the result to a conversation
 with a lender or a family member.
 
-### 10. Localisation and currency ([#23](../../issues/23))
+### 10. Localisation and currency ([#23](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/23))
 
 Currency is unlabelled throughout, and the credit-score bands are CIBIL's
 (India). Both are hard-coded assumptions. Making region a configuration
@@ -122,29 +119,22 @@ concern — currency symbol, bureau score range, typical interest rates,
 affordability conventions — would make the repository genuinely reusable as a
 template for similar tools elsewhere, which is one of its stated goals.
 
-### 11. Accessibility audit ([#22](../../issues/22))
+### 11. Accessibility audit ([#22](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/22))
 
-The templates use semantic HTML, labelled inputs and reasonable contrast, but no
-screen-reader testing has been done and there is no automated axe check in CI. A
-tool that gives people financial guidance should not exclude anyone; this
-deserves to be higher than its position here reflects.
+Chromium/axe now checks eleven pages with the real stylesheet and strict CSP.
+Form-error associations, a skip link and text alternatives are covered. The
+manual screen-reader pass over apply, result and sign-in remains unfinished;
+automated checks do not satisfy that acceptance criterion.
 
 ---
 
 ## Engineering
 
-### 12. Built CSS instead of the CDN ([#30](../../issues/30))
+Built CSS ([#30](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/30)), strict mypy ([#27](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/27)) and
+response security headers ([#36](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/36)) are implemented in the review
+branch. The delivery PR links them for automatic closure when merged.
 
-Removes a network dependency and a third-party script tag, and makes the page
-work offline. Costs a Node build step, which the project currently does not have
-at all — that simplicity is worth something and is why this has not been done.
-
-### 13. Type checking in CI ([#27](../../issues/27))
-
-The codebase is annotated throughout but `mypy`/`pyright` does not run. Adding it
-would catch a class of error the tests do not.
-
-### 14. Structured logging ([#29](../../issues/29))
+### 14. Structured logging ([#29](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/29))
 
 Logs are human-readable strings. JSON lines with request IDs would make them
 useful to an aggregator. Worth doing at the point where anyone is actually

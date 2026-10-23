@@ -81,13 +81,26 @@ bucket per request.
 
 ### Platforms this image runs on unchanged
 
-Fly.io, Render, Railway, Google Cloud Run, AWS App Runner, DigitalOcean App
-Platform, or any Kubernetes cluster. All of them offer a persistent volume,
-which is the only thing the app needs beyond a Python runtime.
+Use a Linux host that supports this container with a writable persistent local
+volume at `/data`. Check storage durability, SQLite locking semantics and
+backup/restore on the actual host before deploying. A provider accepting a
+container image does not establish those properties. Managed multi-instance
+or ephemeral hosting requires a network database first; see [#24](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/24).
 
-On **Cloud Run** specifically, note that instances are ephemeral and the local
-filesystem is not shared between them — treat it like the serverless case below
-and move to Postgres before running more than one instance.
+No hosted deployment or disaster-recovery exercise was performed in the
+[2026-10-23 review](engineering-evidence.md).
+
+### Browser policy and TLS
+
+The application sets CSP (`default-src 'none'`, same-origin styles/images,
+no scripts, same-origin form targets, no frames or base URLs),
+`X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and
+`Referrer-Policy: same-origin` on HTML, JSON, errors, redirects and static
+responses. Keep assets in the committed stylesheet; inline scripts or styles
+will be blocked. See [Flask's security guidance](https://flask.palletsprojects.com/en/stable/web-security/).
+
+Terminate HTTPS at a trusted proxy and configure HSTS there after verifying
+the domain's TLS setup. The app does not send HSTS for local HTTP development.
 
 ---
 

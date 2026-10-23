@@ -38,7 +38,7 @@ audit: ## Dependency vulnerability scan + static security scan
 	python -m pip_audit -r requirements.txt -r requirements-dev.txt --strict
 	python -m bandit -r loanapp app.py -ll
 
-check: lint typecheck test audit ## Everything CI runs
+check: lint typecheck test audit ## Core checks; CI also requires browser, CSS and retraining gates
 
 docker: ## Build the production image
 	docker build -t loanwise:latest .

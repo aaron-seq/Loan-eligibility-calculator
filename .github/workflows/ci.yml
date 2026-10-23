@@ -17,6 +17,70 @@ permissions:
   contents: read
 
 jobs:
+  container:
+    name: Container build and persistence smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the production image (includes retraining)
+        run: docker build -t loanwise:ci .
+
+      - name: Start with a persistent volume and a non-default port
+        run: |
+          docker volume create loanwise-ci-data
+          docker run -d --name loanwise-ci -p 8123:8123 \
+            --health-interval=2s --health-start-period=5s \
+            -e PORT=8123 -e SECRET_KEY=ci-only-session-key-at-least-32-characters \
+            -v loanwise-ci-data:/data loanwise:ci
+
+      - name: Check scoring, headers, non-root execution and container health
+        run: |
+          python scripts/smoke_http.py --base-url http://127.0.0.1:8123
+          test "$(docker exec loanwise-ci id -u)" = "10001"
+          for attempt in $(seq 1 30); do
+            if [ "$(docker inspect --format '{{.State.Health.Status}}' loanwise-ci)" = healthy ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker inspect loanwise-ci
+          exit 1
+
+      - name: Register a disposable account through HTTP
+        run: |
+          python - <<'PY'
+          import json
+          from scripts.smoke_http import request_json
+          result, _ = request_json('http://127.0.0.1:8123', '/register', json.dumps({
+              'user_id': 'ci_volume_test', 'email': 'ci-volume@example.com',
+              'full_name': 'CI Volume Test', 'password': 'ci-disposable-password',
+              'confirm_password': 'ci-disposable-password',
+          }).encode())
+          assert result['success'], result
+          PY
+
+      - name: Replace the container and verify the account survives
+        run: |
+          docker rm -f loanwise-ci
+          docker run -d --name loanwise-ci -p 8123:8123 \
+            -e PORT=8123 -e SECRET_KEY=ci-only-session-key-at-least-32-characters \
+            -v loanwise-ci-data:/data loanwise:ci
+          python scripts/smoke_http.py --base-url http://127.0.0.1:8123
+          python - <<'PY'
+          import json
+          from scripts.smoke_http import request_json
+          result, _ = request_json('http://127.0.0.1:8123', '/login', json.dumps({
+              'user_id': 'ci_volume_test', 'password': 'ci-disposable-password',
+          }).encode())
+          assert result['success'], result
+          PY
+
+      - name: Container diagnostics
+        if: always()
+        run: docker logs loanwise-ci || true
+
   test:
     runs-on: ubuntu-latest
     strategy:

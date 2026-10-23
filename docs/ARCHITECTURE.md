@@ -1,5 +1,21 @@
 # Architecture
 
+## Building the stylesheet
+
+The committed CSS keeps first use independent of a frontend build or CDN.
+After changing template classes or `static/src/tailwind.css`, activate the
+virtual environment and rebuild with Tailwind's pinned standalone CLI:
+
+```powershell
+$env:TAILWINDCSS_VERSION = 'v3.4.19'
+python -m pytailwindcss -i static/src/tailwind.css -o static/css/app.css --content './templates/**/*.html' --minify
+```
+
+In a POSIX shell, use `export TAILWINDCSS_VERSION=v3.4.19` before the same
+Python command, or run `make css`. CI compares a fresh build byte-for-byte
+with the committed file. Native progress values replace inline widths, so the
+CSP can block all inline styles and scripts without breaking the result bars.
+
 Why the code is shaped the way it is. Read this before making a structural
 change.
 
@@ -38,9 +54,11 @@ startup. scikit-learn documents that pickles are not portable across versions;
 the guard turns that from a runtime surprise into a startup refusal with a
 message naming both versions and the remedy.
 
-The check compares *minor* versions. Refusing to load across a patch release
-would turn a security patch into an outage, and patch releases do not change
-pickle layout.
+The guard compares *minor* versions and tolerates patch drift. This is a local
+compatibility policy, not a guarantee from scikit-learn: its [persistence
+documentation](https://scikit-learn.org/stable/model_persistence.html) requires
+the same dependency versions. Keep the exact pins, and retrain and test after
+ML dependency changes.
 
 ### The third contract: feature parameters
 
@@ -151,7 +169,7 @@ flowchart LR
         ENG1 --> CAND["candidates: logistic regression, random forest"]
         CAND --> MONO{"monotonic in loan amount?"}
         MONO -- no --> DQ["disqualified, whatever its AUC"]
-        MONO -- yes --> CAL["sigmoid calibration, kept only if Brier improves"]
+        MONO -- yes --> CAL["sigmoid calibration, selected by training CV Brier loss"]
         CAL --> BUNDLE[("loan_model.joblib")]
     end
 

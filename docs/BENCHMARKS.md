@@ -1,5 +1,28 @@
 # Benchmarks
 
+## Review measurement: 2026-10-23
+
+Personally run with `python scripts/benchmark.py --runs 100` on Windows 11,
+Python 3.13.7, 22 reported logical CPUs, scikit-learn 1.9.1 and numpy 2.4.6.
+Each operation had 20 warm-up calls followed by 100 timed calls. The current
+assessment made three model calls.
+
+| Operation | p50 | p95 | p99 |
+|---|---|---|---|
+| Score | 6.3 ms | 8.1 ms | 9.9 ms |
+| Full assessment | 21.1 ms | 43.4 ms | 50.7 ms |
+| Without guidance | 13.3 ms | 28.3 ms | 32.5 ms |
+
+This is an in-process observation, not a before/after comparison. It does not
+reproduce the HTTP worker-scaling experiment below; Gunicorn requires Unix.
+
+## Earlier measurements reported in PR #35
+
+The remaining figures and equivalence claims were published with
+[PR #35](https://github.com/aaron-seq/Loan-eligibility-calculator/pull/35).
+They were inspected in this review, not personally remeasured on that host.
+Do not compare their latency with the Windows run as a speedup.
+
 Measured with [`scripts/benchmark.py`](../scripts/benchmark.py). **Re-run it
 rather than trusting these figures** — latency depends heavily on the CPU, the
 scikit-learn build and the worker count:
