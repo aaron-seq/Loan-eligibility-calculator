@@ -1,6 +1,6 @@
 [project]
 name = "loanwise"
-version = "2.1.0"
+version = "2.2.0"
 description = "Explainable loan eligibility guidance with calibrated estimates and honest limitations"
 readme = "README.md"
 license = { file = "LICENSE" }

@@ -72,7 +72,8 @@ The CLI prompts for a password. There is no default administrator account.
 | Input ablation and counterfactual guidance | Batched rescoring explains inputs and ranks candidate changes; contributions ignore interactions and do not sum to the estimate | [Explainer](loanapp/explain.py), [benchmarks](docs/BENCHMARKS.md) |
 | Separate affordability rules | Amortised instalments, interest and credit checks remain distinct from the model estimate | [Rules](loanapp/rules.py) |
 | Validated requests and protected sessions | Pydantic schemas, scrypt passwords, CSRF, session rotation, SQL ownership checks, and per-process rate limits | [Schemas](loanapp/schemas.py), [security](loanapp/security.py) |
-| Browser hardening and local styles | Strict CSP, frame protection, nosniff and referrer policy; committed Tailwind CSS without a runtime CDN | [Header tests](tests/test_response_headers.py), [stylesheet](static/src/tailwind.css) |
+| Browser hardening and local styles | Strict CSP, frame protection, nosniff, referrer policy and dynamic-response `no-store`; committed Tailwind CSS | [Header tests](tests/test_response_headers.py), [boundary tests](tests/test_request_boundaries.py) |
+| Transactional history upgrades and ownership tests | SQLite schema v2 suppresses unsupported estimates; tested rollback, concurrent startup and cross-account denials | [Migration tests](tests/test_migrations.py), [actor matrix](tests/test_trust_boundaries.py) |
 | Reproducible engineering checks | Strict mypy, Ruff, pytest/coverage, Chromium/axe, dependency audits, static scans, retraining and CSS freshness gates | [CI](.github/workflows/ci.yml), [review evidence](docs/engineering-evidence.md) |
 | Stateful deployment | Flask app factory, blueprints, SQLite WAL, persistent Docker volume, non-root image and configurable workers | [Deployment](docs/DEPLOYMENT.md) |
 
@@ -88,9 +89,10 @@ with **0 material reversals in 216 comparisons**.
 The final serving estimator is refitted on all 614 rows. The holdout metrics
 describe the evaluation estimator before that refit. Small samples, historical
 bias, and a lack of repayment data limit what these numbers establish.
-Extreme inputs are flagged as outside the model's usable range; the browser
-withholds their percentage. API consumers must inspect `out_of_range` before
-using a score. See [API limitations](docs/API.md#out-of-range-applications).
+Extreme inputs return `probability: null` and band `unavailable`, including
+saved history and comparisons. Rules and affordability remain available.
+Comparisons rank supported estimates only. See the [API contract change](docs/API.md#out-of-range-applications)
+and [database upgrade/recovery steps](docs/DEPLOYMENT.md#schema-v2-upgrade).
 
 ## JSON API
 
@@ -154,6 +156,9 @@ Password recovery, a shared rate-limit store, multi-instance database support,
 larger outcome datasets and other unfinished capabilities are in the
 [roadmap](docs/ROADMAP.md). The [review evidence](docs/engineering-evidence.md)
 records issue/PR dispositions, tests personally run and remaining validation gaps.
+The current [security and testing evidence](docs/security-testing-evidence.md)
+maps the bounded review to regression tests and open findings. Read
+[SECURITY.md](SECURITY.md) before reporting sensitive information.
 
 ## License
 
