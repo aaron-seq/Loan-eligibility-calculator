@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-10-14T09:52:47+00:00",
+  "generated_at": "2026-10-23T07:56:13+00:00",
   "dataset": {
     "path": "data/train.csv",
     "sha256_prefix": "3ac62ced374efaf4",
@@ -9,6 +9,14 @@
   },
   "selected_model": "logistic_regression",
   "calibrated": true,
+  "calibration_selection": {
+    "method": "training_cross_validation",
+    "outer_folds": 5,
+    "inner_calibration_folds": 5,
+    "uncalibrated_brier": 0.20373966116017533,
+    "calibrated_brier": 0.18674735516323743,
+    "use_calibrated": true
+  },
   "cross_validation": {
     "logistic_regression": {
       "roc_auc_mean": 0.7283942597260378,

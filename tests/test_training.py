@@ -7,6 +7,7 @@ job in CI.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -167,3 +168,95 @@ class TestAblationVerdict:
 
     def test_phrases_a_negligible_difference_as_noise(self):
         assert "noise" in _ablation_verdict({"cost_of_exclusion": 0.001})
+
+
+def test_calibration_selection_only_receives_training_rows(
+    dataset, tmp_path, monkeypatch
+):
+    """Changing the holdout's calibration ranking must not select the model."""
+    from sklearn.model_selection import train_test_split
+
+    import loanapp.ml.train as training
+
+    X, y, _, _ = dataset
+    expected, holdout = train_test_split(
+        X, test_size=0.2, random_state=training.RANDOM_STATE, stratify=y
+    )
+    seen = []
+
+    def select(pipeline, features, labels):
+        seen.append(set(features.index))
+        assert set(features.index) == set(expected.index)
+        assert set(features.index).isdisjoint(holdout.index)
+        assert set(labels.index) == set(features.index)
+        # Deliberately select the opposite of this dataset's holdout ranking.
+        return {"use_calibrated": False, "method": "training_cross_validation"}
+
+    monkeypatch.setattr(training, "select_calibration", select, raising=False)
+    monkeypatch.setattr(
+        training,
+        "cross_validate",
+        lambda *args: {
+            "roc_auc_mean": 0.75,
+            "roc_auc_std": 0.05,
+        },
+    )
+    monkeypatch.setattr(
+        training,
+        "candidate_pipelines",
+        lambda: {
+            "logistic_regression": candidate_pipelines()["logistic_regression"],
+        },
+    )
+    monkeypatch.setattr(
+        training,
+        "monotonicity_check",
+        lambda *args: {
+            "monotonic": True,
+            "material_violations": 0,
+            "violations": 0,
+            "comparisons": 216,
+            "worst_drop": 0.0,
+        },
+    )
+    monkeypatch.setattr(training, "ablation_cost", lambda *args: {})
+    metrics = training.train(str(DATA), str(tmp_path), None, RATE, 0.65)
+    assert seen, "calibration was selected from holdout metrics instead of training CV"
+    assert metrics["calibrated"] is False
+
+
+@pytest.mark.parametrize("calibrated_brier,expected", [(0.12, True), (0.22, False)])
+def test_calibration_is_selected_by_cross_validated_brier(
+    dataset, monkeypatch, calibrated_brier, expected
+):
+    import loanapp.ml.train as training
+
+    X, y, _, _ = dataset
+    calls = []
+
+    def score(estimator, features, labels, *, cv, scoring, n_jobs):
+        calls.append((type(estimator).__name__, cv, scoring, list(features.index)))
+        brier = 0.18 if len(calls) == 1 else calibrated_brier
+        return np.full(5, -brier)
+
+    monkeypatch.setattr(training, "cross_val_score", score)
+    selection = training.select_calibration(
+        candidate_pipelines()["logistic_regression"], X, y
+    )
+    assert selection["use_calibrated"] is expected
+    assert len(calls) == 2
+    assert all(call[2] == "neg_brier_score" for call in calls)
+    assert calls[0][1] is calls[1][1]  # identical outer folds for a paired comparison
+
+
+def test_generated_model_card_is_utf8(tmp_path):
+    from loanapp.ml.registry import load_bundle
+    from loanapp.ml.train import write_model_card
+
+    root = DATA.parent.parent
+    metrics = json.loads((root / "models" / "metrics.json").read_text(encoding="utf-8"))
+    target = tmp_path / "MODEL.md"
+    write_model_card(metrics, load_bundle(str(root / "models")), str(target))
+    text = target.read_text(encoding="utf-8")
+    assert "±" in text
+    assert "—" in text

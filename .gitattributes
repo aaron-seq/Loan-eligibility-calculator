@@ -1,0 +1,5 @@
+# Keep dataset fingerprints identical on Windows and Unix checkouts.
+data/*.csv text eol=lf
+docs/MODEL.md text eol=lf
+models/metrics.json text eol=lf
+models/*.joblib binary
