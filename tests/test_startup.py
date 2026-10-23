@@ -22,7 +22,27 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 pytest.importorskip("gunicorn")
 
 
+def test_entrypoint_reports_configuration_error_and_exits(tmp_path):
+    """The config failure is also checked on platforms without Gunicorn."""
+    entrypoint = tmp_path / "app.py"
+    shutil.copy(REPO_ROOT / "app.py", entrypoint)
+    env = {k: v for k, v in os.environ.items() if k != "SECRET_KEY"}
+    env.update(FLASK_ENV="production", PYTHONPATH=str(REPO_ROOT))
+    result = subprocess.run(
+        [sys.executable, "app.py"],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 3
+    assert "SECRET_KEY is required in production" in result.stderr
+
+
 @pytest.mark.slow
+@pytest.mark.skipif(sys.platform == "win32", reason="gunicorn requires Unix (fcntl)")
 def test_gunicorn_exits_on_a_configuration_error(tmp_path):
     # A copy of app.py, so a developer's .env next to the real one cannot
     # supply the SECRET_KEY this test relies on being absent.
