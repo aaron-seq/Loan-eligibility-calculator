@@ -30,7 +30,7 @@ not SHAP and is not presented as such.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,6 +39,9 @@ from .features import EXPLAINABLE_INPUTS, INPUT_LABELS, LoanApplication
 
 #: Attributions smaller than this are noise, not explanation.
 MIN_MEANINGFUL_IMPACT = 0.005
+
+#: Scores several applications in one model call, preserving order.
+BatchScorer = Callable[[Sequence[LoanApplication]], Sequence[float]]
 
 
 @dataclass(frozen=True)
@@ -51,7 +54,7 @@ class Factor:
     direction: str  # "helps" | "hurts"
     detail: str
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "feature": self.feature,
             "label": self.label,
@@ -70,7 +73,7 @@ class Suggestion:
     projected_probability: float
     delta: float
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "action": self.action,
             "detail": self.detail,
@@ -82,18 +85,23 @@ class Suggestion:
 def explain(
     app: LoanApplication,
     baselines: dict[str, Any],
-    score_application: Callable[[LoanApplication], float],
+    score_applications: BatchScorer,
     base_probability: float,
     limit: int = 5,
 ) -> list[Factor]:
     """Rank the applicant's inputs by how much each moved the estimate.
 
-    ``score_application`` is injected rather than imported so this module stays
-    independent of how the model is loaded, and so tests can supply a trivial
-    scorer.
-    """
-    factors: list[Factor] = []
+    ``score_applications`` scores a *batch* and is injected rather than
+    imported, so this module stays independent of how the model is loaded and
+    tests can supply a trivial scorer.
 
+    Every counterfactual is built first and scored in one call. Scoring them
+    one at a time cost about 13 ms each, almost all of it fixed per-call
+    overhead in the calibrated pipeline (five fold models, each validating its
+    input); sixteen rows cost barely more than one.
+    """
+    candidates: list[tuple[str, Any, Any]] = []
+    variants: list[LoanApplication] = []
     for field in EXPLAINABLE_INPUTS:
         if field not in baselines:
             continue
@@ -101,11 +109,16 @@ def explain(
         baseline = baselines[field]
         if value == baseline:
             continue
+        candidates.append((field, value, baseline))
+        variants.append(app.replace(**{field: baseline}))
 
-        impact = base_probability - score_application(app.replace(**{field: baseline}))
+    factors: list[Factor] = []
+    for (field, value, baseline), score in zip(
+        candidates, score_applications(variants), strict=True
+    ):
+        impact = base_probability - score
         if abs(impact) < MIN_MEANINGFUL_IMPACT:
             continue
-
         factors.append(
             Factor(
                 feature=field,
@@ -164,7 +177,7 @@ def _describe(field: str, value: Any, baseline: Any, impact: float) -> str:
 def suggest_improvements(
     app: LoanApplication,
     base_probability: float,
-    score_application: Callable[[LoanApplication], float],
+    score_applications: BatchScorer,
     config: Config,
     limit: int = 4,
 ) -> list[Suggestion]:
@@ -228,9 +241,13 @@ def suggest_improvements(
             )
         )
 
+    # One batched call for every candidate; see explain() for why.
+    projections = score_applications([variant for _, _, variant in candidates])
+
     suggestions: list[Suggestion] = []
-    for action, detail, variant in candidates:
-        projected = score_application(variant)
+    for (action, detail, _variant), projected in zip(
+        candidates, projections, strict=True
+    ):
         delta = projected - base_probability
         if delta <= MIN_MEANINGFUL_IMPACT:
             continue

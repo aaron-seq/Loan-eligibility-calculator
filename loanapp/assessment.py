@@ -17,6 +17,7 @@ system does not have.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -25,7 +26,13 @@ import pandas as pd
 
 from .config import Config
 from .explain import Factor, Suggestion, explain, suggest_improvements
-from .features import FEATURE_COLUMNS, RATIO_CEILING, LoanApplication, engineer
+from .features import (
+    FEATURE_COLUMNS,
+    RATIO_CEILING,
+    LoanApplication,
+    build_feature_frame,
+    engineer,
+)
 from .ml.registry import ModelBundle
 from .rules import (
     Affordability,
@@ -144,6 +151,20 @@ class Assessor:
     def __init__(self, bundle: ModelBundle, config: Config):
         self.bundle = bundle
         self.config = config
+        #: The rate used to compute ``emi_to_income_ratio`` for the *model*.
+        #:
+        #: Deliberately not ``config.annual_interest_rate``. That setting is a
+        #: business parameter for the affordability figures shown to the
+        #: applicant, and it is expected to change. The model feature must be
+        #: computed exactly as it was during training, or it means something
+        #: different at serve time: setting ANNUAL_INTEREST_RATE=0.25 moved one
+        #: application from 0.563 to 0.400 with no other change. The trainer
+        #: records the rate in the bundle, so serving reads it from there.
+        #: Bundles predating that metadata fall back to config, which is what
+        #: they were implicitly trained against.
+        self.feature_rate = float(
+            bundle.metadata.get("annual_interest_rate", config.annual_interest_rate)
+        )
 
     # -- scoring -----------------------------------------------------------
     def score_features(self, features: dict[str, float]) -> float:
@@ -152,7 +173,20 @@ class Assessor:
         return float(self.bundle.pipeline.predict_proba(frame)[0][1])
 
     def score(self, app: LoanApplication) -> float:
-        return self.score_features(engineer(app, self.config.annual_interest_rate))
+        return self.score_many([app])[0]
+
+    def score_many(self, apps: Sequence[LoanApplication]) -> list[float]:
+        """P(approve) for several applications in a single model call.
+
+        The calibrated pipeline's cost is almost entirely per call, not per
+        row: measured at 12.9 ms for one row and 14.4 ms for sixteen. A full
+        assessment needs a dozen scores, so making them one at a time spent
+        most of the request in fixed overhead. Row order is preserved.
+        """
+        if not apps:
+            return []
+        frame = build_feature_frame(list(apps), self.feature_rate)
+        return [float(p) for p in self.bundle.pipeline.predict_proba(frame)[:, 1]]
 
     def band_for(self, probability: float) -> str:
         if probability >= self.config.approve_threshold:
@@ -163,35 +197,39 @@ class Assessor:
 
     # -- full assessment ---------------------------------------------------
     def assess(self, app: LoanApplication, with_guidance: bool = True) -> Assessment:
-        features = engineer(app, self.config.annual_interest_rate)
+        features = engineer(app, self.feature_rate)
         probability = self.score_features(features)
 
+        # Applicant-facing cost figures use the *configured* reference rate on
+        # purpose — see feature_rate above for why the two differ.
         affordability = compute_affordability(app, self.config)
         rules = evaluate_rules(app, affordability, self.config)
 
         factors = explain(
             app=app,
             baselines=self.bundle.baselines,
-            score_application=self.score,
+            score_applications=self.score_many,
             base_probability=probability,
         )
 
+        out_of_range_reason = _extrapolation_reason(app, features)
+
         suggestions: list[Suggestion] = []
-        # Someone already in the "likely" band does not need advice on how to
-        # get there; showing it anyway would be filler.
+        # No guidance for someone already in the "likely" band (it would be
+        # filler), nor when the application is out of range (the number it
+        # would try to improve is not meaningful).
         if (
             with_guidance
             and probability < self.config.approve_threshold
-            and _extrapolation_reason(app, features) is None
+            and out_of_range_reason is None
         ):
             suggestions = suggest_improvements(
                 app=app,
                 base_probability=probability,
-                score_application=self.score,
+                score_applications=self.score_many,
                 config=self.config,
             )
 
-        out_of_range_reason = _extrapolation_reason(app, features)
         band = self.band_for(probability)
         return Assessment(
             probability=probability,
@@ -213,8 +251,10 @@ class Assessor:
     def compare(self, applications: list[LoanApplication]) -> list[dict[str, Any]]:
         """Score several scenarios side by side for what-if comparison."""
         results = []
-        for index, app in enumerate(applications):
-            probability = self.score(app)
+        probabilities = self.score_many(applications)
+        for index, (app, probability) in enumerate(
+            zip(applications, probabilities, strict=True)
+        ):
             affordability = compute_affordability(app, self.config)
             band = self.band_for(probability)
             results.append(

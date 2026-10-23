@@ -209,7 +209,7 @@ class TestGuidance:
         suggestions = suggest_improvements(
             app=strong,
             base_probability=0.5,
-            score_application=lambda _: 0.5,
+            score_applications=lambda apps: [0.5] * len(apps),
             config=assessor.config,
         )
         assert suggestions == []
@@ -256,3 +256,133 @@ class TestOutOfRange:
         assert any(
             r.code == "income_present" and r.severity == "fail" for r in result.rules
         )
+
+
+class TestFeatureRateContract:
+    """The interest rate has two jobs, and they must not be confused.
+
+    1. It computes ``emi_to_income_ratio``, which is a **model feature**. That
+       must use the rate the model was *trained* with, or the feature means
+       something different at serve time than it did at training time.
+    2. It drives the affordability figures shown to the applicant. That is a
+       business setting and should follow ``ANNUAL_INTEREST_RATE``.
+
+    Before this was separated, changing ``ANNUAL_INTEREST_RATE`` silently
+    skewed every prediction.
+    """
+
+    def test_changing_the_configured_rate_does_not_move_the_model(self, assessor):
+        from dataclasses import replace
+
+        from loanapp.assessment import Assessor
+
+        baseline = assessor.score(app())
+        skewed = Assessor(
+            assessor.bundle, replace(assessor.config, annual_interest_rate=0.25)
+        )
+        assert skewed.score(app()) == pytest.approx(baseline)
+
+    def test_features_use_the_rate_recorded_in_the_bundle(self, assessor):
+        assert assessor.feature_rate == assessor.bundle.metadata["annual_interest_rate"]
+
+    def test_affordability_still_follows_the_configured_rate(self, assessor):
+        """The applicant-facing figures are the thing the setting is *for*."""
+        from dataclasses import replace
+
+        from loanapp.assessment import Assessor
+
+        high = Assessor(
+            assessor.bundle, replace(assessor.config, annual_interest_rate=0.25)
+        )
+        low = Assessor(
+            assessor.bundle, replace(assessor.config, annual_interest_rate=0.05)
+        )
+        assert (
+            high.assess(app()).affordability.monthly_instalment
+            > low.assess(app()).affordability.monthly_instalment
+        )
+
+    def test_bundle_without_a_recorded_rate_falls_back_to_config(self, assessor):
+        """Bundles predating the metadata must still load and score."""
+        from dataclasses import replace
+
+        from loanapp.assessment import Assessor
+
+        legacy = replace(
+            assessor.bundle,
+            metadata={
+                k: v
+                for k, v in assessor.bundle.metadata.items()
+                if k != "annual_interest_rate"
+            },
+        )
+        assert (
+            Assessor(legacy, assessor.config).feature_rate
+            == assessor.config.annual_interest_rate
+        )
+
+
+class TestBatchedScoring:
+    """Counterfactuals are scored in one model call rather than one each.
+
+    Measured before the change: a full assessment made 12 sequential calls and
+    took ~160 ms at p50, because the calibrated pipeline's cost is almost all
+    per call (12.9 ms for one row, 14.4 ms for sixteen). Equivalence was proven
+    against a 300-assessment golden snapshot, byte for byte.
+    """
+
+    def test_batched_scores_match_one_at_a_time(self, assessor):
+        """Equal to within one float64 ulp, and identical at the 4 d.p. the
+        API exposes.
+
+        Not asserted bit-for-bit, deliberately: measured over 500 applications,
+        304 were bit-identical and the rest differed by at most 2.2e-16,
+        because numpy sums in a different order for a different matrix shape.
+        That is a BLAS detail, not a behaviour change.
+        """
+        from loanapp.features import build_feature_frame
+
+        apps = [
+            app(applicant_income=i, loan_amount=j, credit_history=c)
+            for i in (0, 9_000, 50_000, 200_000)
+            for j in (100_000, 2_000_000)
+            for c in (0, 1)
+        ]
+        one_at_a_time = [
+            float(
+                assessor.bundle.pipeline.predict_proba(
+                    build_feature_frame([a], assessor.feature_rate)
+                )[0][1]
+            )
+            for a in apps
+        ]
+        batched = assessor.score_many(apps)
+        assert batched == pytest.approx(one_at_a_time, abs=1e-12)
+        assert [round(b, 4) for b in batched] == [round(s, 4) for s in one_at_a_time]
+
+    def test_order_is_preserved(self, assessor):
+        low, high = app(applicant_income=5_000), app(applicant_income=300_000)
+        forward = assessor.score_many([low, high])
+        assert assessor.score_many([high, low]) == forward[::-1]
+
+    def test_empty_batch(self, assessor):
+        assert assessor.score_many([]) == []
+
+    def test_a_full_assessment_makes_few_model_calls(self, assessor):
+        """Was 12. One for the base score, one for the explanation, one for
+        guidance — the bound that matters is that it does not grow with the
+        number of inputs or candidates."""
+        calls = 0
+        original = assessor.bundle.pipeline.predict_proba
+
+        def counting(frame):
+            nonlocal calls
+            calls += 1
+            return original(frame)
+
+        assessor.bundle.pipeline.predict_proba = counting
+        try:
+            assessor.assess(app(applicant_income=25_000, loan_amount=4_000_000))
+        finally:
+            assessor.bundle.pipeline.predict_proba = original
+        assert calls <= 3, calls

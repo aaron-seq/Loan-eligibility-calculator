@@ -1,0 +1,22 @@
+/*
+ * Source for static/css/app.css. Rebuild with `make css` after changing any
+ * Tailwind class in templates/ — CI fails if the committed output is stale.
+ *
+ * Built from the standalone Tailwind CLI (v3.4.19, the official v3-lts line)
+ * via pytailwindcss, so no Node toolchain is needed. v3 rather than v4
+ * because the templates were written against the v3 CDN; see
+ * docs/ARCHITECTURE.md.
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Native values replace inline widths, so the strict CSP can block inline CSS.
+   The surrounding text states each value; these bars are decorative. */
+.outcome-meter { appearance: none; display: block; width: 100%; height: 100%; border: 0; background: transparent; }
+.outcome-meter::-webkit-progress-bar { background: transparent; }
+.outcome-meter.bg-emerald-500 { color: #10b981; }
+.outcome-meter.bg-amber-500 { color: #f59e0b; }
+.outcome-meter.bg-rose-500 { color: #f43f5e; }
+.outcome-meter::-webkit-progress-value { background: currentColor; }
+.outcome-meter::-moz-progress-bar { background: currentColor; }

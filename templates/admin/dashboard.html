@@ -34,12 +34,12 @@
               <span class="text-slate-700 capitalize">{{ band }}</span>
               <span class="tabular-nums text-slate-500">{{ count }} ({{ pct }}%)</span>
             </div>
-            <div class="mt-1 h-2 rounded-full bg-slate-100 overflow-hidden">
-              <div class="h-full
+            <div class="mt-1 h-2 rounded-full bg-slate-100 overflow-hidden" aria-hidden="true">
+              <progress max="100" value="{{ pct }}" class="outcome-meter
                 {% if band == 'likely' %}bg-emerald-500
                 {% elif band == 'borderline' %}bg-amber-500
                 {% else %}bg-rose-500{% endif %}"
-                style="width: {{ pct }}%"></div>
+              ></progress>
             </div>
           </li>
         {% endfor %}

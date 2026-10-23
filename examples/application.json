@@ -1,0 +1,11 @@
+{
+  "applicant_income": 50000,
+  "coapplicant_income": 10000,
+  "loan_amount": 1500000,
+  "loan_term_months": 240,
+  "credit_history": 1,
+  "dependents": 1,
+  "education": "graduate",
+  "property_area": "urban",
+  "cibil_score": 730
+}

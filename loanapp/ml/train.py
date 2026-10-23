@@ -30,6 +30,7 @@ import json
 import os
 from datetime import UTC, datetime
 from itertools import pairwise
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -50,6 +51,7 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import (
     RepeatedStratifiedKFold,
+    StratifiedKFold,
     cross_val_score,
     train_test_split,
 )
@@ -143,8 +145,15 @@ def candidate_pipelines() -> dict[str, Pipeline]:
     }
 
 
-def cross_validate(pipeline: Pipeline, X: pd.DataFrame, y: pd.Series) -> dict[str, float]:
-    """Repeated stratified CV. We report the spread, not just the mean."""
+def cross_validate(
+    pipeline: Pipeline, X: pd.DataFrame, y: pd.Series[int]
+) -> dict[str, Any]:
+    """Repeated stratified CV. We report the spread, not just the mean.
+
+    Returns ``dict[str, Any]``, not ``dict[str, float]`` as it was annotated:
+    ``roc_auc_ci95`` is a two-element list. The old annotation was simply
+    wrong, and the type checker was the first thing to notice.
+    """
     cv = RepeatedStratifiedKFold(n_splits=5, n_repeats=4, random_state=RANDOM_STATE)
     auc = cross_val_score(pipeline, X, y, cv=cv, scoring="roc_auc", n_jobs=-1)
     acc = cross_val_score(pipeline, X, y, cv=cv, scoring="accuracy", n_jobs=-1)
@@ -165,6 +174,37 @@ def cross_validate(pipeline: Pipeline, X: pd.DataFrame, y: pd.Series) -> dict[st
 # --------------------------------------------------------------------------
 # Evaluation
 # --------------------------------------------------------------------------
+def select_calibration(
+    pipeline: Pipeline, X: pd.DataFrame, y: pd.Series[int]
+) -> dict[str, Any]:
+    """Choose calibration using paired outer folds of the training split only.
+
+    The calibrated candidate fits its sigmoid on inner folds. Neither candidate
+    sees the outer validation labels during fitting, and the final holdout is
+    never passed here. Lower Brier loss wins; holdout metrics remain reporting.
+    """
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
+    uncalibrated = -cross_val_score(
+        pipeline, X, y, cv=cv, scoring="neg_brier_score", n_jobs=-1
+    ).mean()
+    calibrated = -cross_val_score(
+        CalibratedClassifierCV(pipeline, method="sigmoid", cv=5),
+        X,
+        y,
+        cv=cv,
+        scoring="neg_brier_score",
+        n_jobs=-1,
+    ).mean()
+    return {
+        "method": "training_cross_validation",
+        "outer_folds": 5,
+        "inner_calibration_folds": 5,
+        "uncalibrated_brier": float(uncalibrated),
+        "calibrated_brier": float(calibrated),
+        "use_calibrated": bool(calibrated <= uncalibrated),
+    }
+
+
 def reliability_table(
     y_true: np.ndarray, probs: np.ndarray, bins: int = 5
 ) -> list[dict[str, Any]]:
@@ -230,7 +270,12 @@ def fairness_audit(
             continue
         groups: dict[str, Any] = {}
         for value, idx in raw_holdout.groupby(column).groups.items():
-            positions = [raw_holdout.index.get_loc(i) for i in idx]
+            # get_indexer returns integer positions. The previous
+            # [index.get_loc(i) ...] form was typed as int | slice | mask,
+            # because get_loc returns a slice or boolean mask on a
+            # non-unique index — correct here only because the caller had
+            # reset the index first.
+            positions = raw_holdout.index.get_indexer(idx)
             if len(positions) < 10:  # too few to say anything meaningful
                 continue
             groups[str(value)] = {
@@ -359,7 +404,7 @@ def monotonicity_check(pipeline: Pipeline, annual_rate: float) -> dict[str, Any]
     }
 
 
-def compute_baselines(applications: list) -> dict[str, Any]:
+def compute_baselines(applications: list[LoanApplication]) -> dict[str, Any]:
     """Reference value per *input*, used by the explainer.
 
     Baselines are computed over applicant-visible inputs rather than engineered
@@ -403,7 +448,7 @@ def train(
 
     # 1. Select a model on cross-validated ROC-AUC over the training split
     #    only. The holdout is never used for selection.
-    cv_results: dict[str, dict[str, float]] = {}
+    cv_results: dict[str, dict[str, Any]] = {}
     for name, pipeline in candidate_pipelines().items():
         cv_results[name] = cross_validate(pipeline, X_train, y_train)
         print(
@@ -447,6 +492,10 @@ def train(
 
     base_pipeline = candidate_pipelines()[best_name]
 
+    # Freeze the calibration choice before looking at any holdout metric.
+    calibration_selection = select_calibration(base_pipeline, X_train, y_train)
+    use_calibrated = calibration_selection["use_calibrated"]
+
     # 2. Uncalibrated baseline on the holdout, so we can prove calibration
     #    was worth applying rather than assuming it.
     base_pipeline.fit(X_train, y_train)
@@ -462,11 +511,10 @@ def train(
     calibrated_probs = calibrated.predict_proba(X_test)[:, 1]
     calibrated_metrics = evaluate(y_test.to_numpy(), calibrated_probs, threshold)
 
-    use_calibrated = calibrated_metrics["brier_score"] <= uncalibrated["brier_score"]
     print(
         f"Brier: uncalibrated {uncalibrated['brier_score']:.4f} vs "
         f"calibrated {calibrated_metrics['brier_score']:.4f} -> "
-        f"{'calibrated' if use_calibrated else 'uncalibrated'}"
+        f"{'calibrated' if use_calibrated else 'uncalibrated'} (selected on training CV)"
     )
 
     holdout_probs = calibrated_probs if use_calibrated else uncalibrated_probs
@@ -499,7 +547,7 @@ def train(
     metrics = {
         "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "dataset": {
-            "path": os.path.relpath(data_path, BASE_DIR),
+            "path": Path(os.path.relpath(data_path, BASE_DIR)).as_posix(),
             "sha256_prefix": fingerprint(data_path),
             "rows": len(X),
             "approval_rate": round(float(y.mean()), 4),
@@ -507,6 +555,7 @@ def train(
         },
         "selected_model": best_name,
         "calibrated": use_calibrated,
+        "calibration_selection": calibration_selection,
         "cross_validation": cv_results,
         "monotonicity": monotonicity,
         "served_model_monotonicity": served_monotonicity,
@@ -547,7 +596,7 @@ def train(
     print(f"Saved bundle -> {path}")
 
     metrics_path = os.path.join(model_dir, "metrics.json")
-    with open(metrics_path, "w") as fh:
+    with open(metrics_path, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(metrics, fh, indent=2)
     print(f"Saved metrics -> {metrics_path}")
 
@@ -614,7 +663,7 @@ def write_model_card(metrics: dict[str, Any], bundle: ModelBundle, path: str) ->
     fairness_table = "\n".join(fairness_rows) or "| – | – | – | – |"
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as fh:
+    with open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(f"""# Model card
 
 *Generated by `python -m loanapp.ml.train` on {
@@ -698,6 +747,14 @@ actually happened in that band.
 
 Uncalibrated Brier score: {metrics["holdout_uncalibrated"]["brier_score"]:.4f} ·
 Calibrated: {metrics["holdout_calibrated"]["brier_score"]:.4f}.
+
+Calibration is selected on the **training split only**, using five paired outer
+folds and five inner calibration folds. Training CV Brier loss:
+uncalibrated {metrics["calibration_selection"]["uncalibrated_brier"]:.4f},
+calibrated {metrics["calibration_selection"]["calibrated_brier"]:.4f}.
+The holdout is evaluated after that choice is frozen. The served estimator is
+then refitted on all {ds["rows"]} rows; the holdout numbers describe the evaluation
+estimator, not a new independent test of that final refit.
 
 **Calibration imposes a probability floor.** Platt scaling is fitted on the
 training range, so inputs far outside it extrapolate to the sigmoid's

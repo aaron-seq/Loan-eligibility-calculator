@@ -17,6 +17,70 @@ permissions:
   contents: read
 
 jobs:
+  container:
+    name: Container build and persistence smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the production image (includes retraining)
+        run: docker build -t loanwise:ci .
+
+      - name: Start with a persistent volume and a non-default port
+        run: |
+          docker volume create loanwise-ci-data
+          docker run -d --name loanwise-ci -p 8123:8123 \
+            --health-interval=2s --health-start-period=5s \
+            -e PORT=8123 -e SECRET_KEY=ci-only-session-key-at-least-32-characters \
+            -v loanwise-ci-data:/data loanwise:ci
+
+      - name: Check scoring, headers, non-root execution and container health
+        run: |
+          python scripts/smoke_http.py --base-url http://127.0.0.1:8123
+          test "$(docker exec loanwise-ci id -u)" = "10001"
+          for attempt in $(seq 1 30); do
+            if [ "$(docker inspect --format '{{.State.Health.Status}}' loanwise-ci)" = healthy ]; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker inspect loanwise-ci
+          exit 1
+
+      - name: Register a disposable account through HTTP
+        run: |
+          python - <<'PY'
+          import json
+          from scripts.smoke_http import request_json
+          result, _ = request_json('http://127.0.0.1:8123', '/register', json.dumps({
+              'user_id': 'ci_volume_test', 'email': 'ci-volume@example.com',
+              'full_name': 'CI Volume Test', 'password': 'ci-disposable-password',
+              'confirm_password': 'ci-disposable-password',
+          }).encode())
+          assert result['success'], result
+          PY
+
+      - name: Replace the container and verify the account survives
+        run: |
+          docker rm -f loanwise-ci
+          docker run -d --name loanwise-ci -p 8123:8123 \
+            -e PORT=8123 -e SECRET_KEY=ci-only-session-key-at-least-32-characters \
+            -v loanwise-ci-data:/data loanwise:ci
+          python scripts/smoke_http.py --base-url http://127.0.0.1:8123
+          python - <<'PY'
+          import json
+          from scripts.smoke_http import request_json
+          result, _ = request_json('http://127.0.0.1:8123', '/login', json.dumps({
+              'user_id': 'ci_volume_test', 'password': 'ci-disposable-password',
+          }).encode())
+          assert result['success'], result
+          PY
+
+      - name: Container diagnostics
+        if: always()
+        run: docker logs loanwise-ci || true
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -27,9 +91,9 @@ jobs:
         python-version: ["3.11", "3.12", "3.13"]
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -40,8 +104,27 @@ jobs:
 
       - name: Lint
         run: |
-          ruff check loanapp tests app.py
-          ruff format --check loanapp tests app.py
+          ruff check loanapp tests scripts app.py
+          ruff format --check loanapp tests scripts app.py
+
+      - name: Committed stylesheet matches the templates
+        # Tailwind only emits classes it finds in templates/, so a class added
+        # without rebuilding is silently unstyled. Rebuild and compare.
+        if: matrix.python-version == '3.13'
+        env:
+          TAILWINDCSS_VERSION: v3.4.19
+        run: |
+          python -m pytailwindcss -i static/src/tailwind.css -o /tmp/app.css --content "./templates/**/*.html" --minify
+          if ! diff -q /tmp/app.css static/css/app.css; then
+            echo "static/css/app.css is stale. Run \`make css\` and commit the result."
+            exit 1
+          fi
+
+      - name: Type check
+        # Strict, across the whole package. On its first run this found a
+        # wrong return annotation in the trainer and a schema helper that
+        # erased the concrete type at every call site.
+        run: mypy
 
       - name: Test
         run: pytest --cov=loanapp --cov-report=term-missing
@@ -49,9 +132,9 @@ jobs:
   security:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
@@ -69,15 +152,42 @@ jobs:
       - name: Static security scan
         run: bandit -r loanapp app.py -ll
 
+  accessibility:
+    # axe-core in real Chromium, against the real stylesheet. The audit guards
+    # its own validity: if the stylesheet fails to load, test_styles_are_loaded
+    # fails rather than letting every contrast check pass on unstyled HTML.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Audit
+        # A11Y_REQUIRED turns "cannot run" into a failure. Without it a broken
+        # browser install would skip every test and this job would pass green.
+        env:
+          A11Y_REQUIRED: "1"
+        run: pytest -m a11y -rs
+
   train:
     # Training is the part most likely to break silently: it is the only thing
     # that proves the committed bundle still matches the contracts in the code,
     # and that the model card's numbers can be reproduced.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
           cache: pip
