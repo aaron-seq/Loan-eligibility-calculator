@@ -18,6 +18,7 @@ from typing import Any, TypeVar, cast
 
 from flask import (
     Flask,
+    Response,
     current_app,
     flash,
     g,
@@ -41,6 +42,21 @@ CSRF_SESSION_KEY = "_csrf_token"
 CSRF_FORM_FIELD = "csrf_token"
 CSRF_HEADER = "X-CSRF-Token"
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
+
+
+def install_security_headers(app: Flask) -> None:
+    """Apply the same policy to HTML, JSON, redirects, errors and static files."""
+
+    @app.after_request
+    def secure_response(response: Response) -> Response:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; script-src 'none'; style-src 'self'; "
+            "img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+        )
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "same-origin"
+        return response
 
 
 # --------------------------------------------------------------------------

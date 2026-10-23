@@ -65,6 +65,8 @@ PAGES = (
     "signup",
     "not-found",
     "dashboard",
+    "saved-application",
+    "admin",
 )
 
 
@@ -107,6 +109,15 @@ def live_server(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
             cookie_secure=False,
         )
     )
+    from loanapp.security import hash_password
+
+    app.extensions["user_repository"].create(
+        "audit_admin",
+        "audit-admin@example.com",
+        "Audit Admin",
+        hash_password("audit-admin-password"),
+        is_admin=True,
+    )
     server = make_server("127.0.0.1", 0, app)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -125,6 +136,15 @@ def audit(live_server: str) -> dict[str, Any]:
     with sync_api.sync_playwright() as playwright:
         browser = _launch(playwright)
         page = browser.new_page()
+        csp_errors = []
+        page.on(
+            "console",
+            lambda message: (
+                csp_errors.append(message.text)
+                if "violates the following Content Security Policy" in message.text
+                else None
+            ),
+        )
 
         def check(name: str) -> None:
             results[name] = axe.run(page).response["violations"]
@@ -176,8 +196,25 @@ def audit(live_server: str) -> dict[str, Any]:
         page.goto(live_server + "/dashboard")
         check("dashboard")
 
+        page.get_by_role("link", name="View", exact=True).first.click()
+        check("saved-application")
+
+        _sign_in_as_admin(page, live_server)
+        page.goto(live_server + "/admin/")
+        check("admin")
+        results["_csp_errors"] = csp_errors
+
         browser.close()
     return results
+
+
+def _sign_in_as_admin(page: Any, live_server: str) -> None:
+    page.get_by_role("button", name="Sign out", exact=True).click()
+    page.goto(live_server + "/login")
+    page.fill("#user_id", "audit_admin")
+    page.fill("#password", "audit-admin-password")
+    page.click("form button")
+    page.wait_for_load_state()
 
 
 def test_styles_are_loaded(audit: dict[str, Any]) -> None:
@@ -186,6 +223,10 @@ def test_styles_are_loaded(audit: dict[str, Any]) -> None:
     assert audit["_cta_background"] not in ("rgba(0, 0, 0, 0)", "transparent"), (
         "Stylesheet did not load; the contrast results would be meaningless."
     )
+
+
+def test_csp_does_not_block_page_resources(audit: dict[str, Any]) -> None:
+    assert not audit["_csp_errors"], audit["_csp_errors"]
 
 
 @pytest.mark.parametrize("page_name", PAGES)

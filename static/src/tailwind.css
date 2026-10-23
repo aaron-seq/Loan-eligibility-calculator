@@ -10,3 +10,13 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Native values replace inline widths, so the strict CSP can block inline CSS.
+   The surrounding text states each value; these bars are decorative. */
+.outcome-meter { appearance: none; display: block; width: 100%; height: 100%; border: 0; background: transparent; }
+.outcome-meter::-webkit-progress-bar { background: transparent; }
+.outcome-meter.bg-emerald-500 { color: #10b981; }
+.outcome-meter.bg-amber-500 { color: #f59e0b; }
+.outcome-meter.bg-rose-500 { color: #f43f5e; }
+.outcome-meter::-webkit-progress-value { background: currentColor; }
+.outcome-meter::-moz-progress-bar { background: currentColor; }

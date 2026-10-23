@@ -23,7 +23,7 @@ from .assessment import Assessor
 from .config import Config, load_config
 from .db import ApplicationRepository, UserRepository, initialise
 from .ml.registry import ModelContractError, ModelUnavailable, load_bundle
-from .security import install_csrf
+from .security import install_csrf, install_security_headers
 
 __version__ = "2.1.0"
 
@@ -68,6 +68,7 @@ def create_app(config: Config | None = None) -> Flask:
 
     _load_model(app, config)
     install_csrf(app)
+    install_security_headers(app)
     _register_blueprints(app)
     _register_error_handlers(app)
     _register_cli(app)
