@@ -17,9 +17,10 @@
   <section class="rounded-lg border border-slate-200 bg-white p-6">
     <div class="flex items-baseline justify-between">
       <span class="text-sm text-slate-500">Estimate at the time</span>
-      <span class="text-3xl font-bold text-slate-900">{{ (a.probability * 100)|round|int }}%</span>
+      <span class="text-3xl font-bold text-slate-900">{% if a.probability is not none %}{{ (a.probability * 100)|round|int }}%{% else %}Estimate unavailable{% endif %}</span>
     </div>
     <p class="mt-2 text-sm text-slate-600">{{ a.band_label }}</p>
+    {% if a.out_of_range_reason %}<p class="mt-2 text-sm text-slate-600">{{ a.out_of_range_reason }}.</p>{% endif %}
   </section>
 
   <section class="bg-white rounded-lg border border-slate-200 p-6">
@@ -37,6 +38,21 @@
       {% endfor %}
     </dl>
   </section>
+
+  {% if a.out_of_range and a.affordability %}
+    <section class="bg-white rounded-lg border border-slate-200 p-6">
+      <h2 class="font-semibold text-slate-900">What this loan would cost you</h2>
+      <p class="mt-2 text-sm text-slate-600">Monthly instalment:
+        <strong>{{ '{:,.0f}'.format(a.affordability.monthly_instalment) }}</strong>
+        at the recorded reference rate of {{ '%.2f'|format(a.affordability.annual_interest_rate * 100) }}% per year.
+      </p>
+      <ul class="mt-4 space-y-2 text-sm text-slate-700">
+        {% for rule in a.rules %}
+          <li><strong>{{ rule.severity|capitalize }}: {{ rule.title }}</strong> — {{ rule.detail }}</li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
 
   {% if a.factors %}
     <section class="bg-white rounded-lg border border-slate-200 p-6">

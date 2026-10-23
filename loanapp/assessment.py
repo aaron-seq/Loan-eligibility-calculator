@@ -49,9 +49,10 @@ DISCLAIMER = (
     "full bureau report that this tool never sees."
 )
 
-#: Applicant-facing labels for the three decision bands. Phrased as likelihood
+#: Applicant-facing labels for supported bands and the unavailable state. Phrased as likelihood
 #: rather than as a verdict, because that is what the model actually produces.
 BAND_LABELS = {
+    "unavailable": "Estimate unavailable",
     "likely": "Likely to be approved",
     "borderline": "Borderline",
     "unlikely": "Unlikely to be approved",
@@ -113,7 +114,9 @@ class Assessment:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "probability": round(self.probability, 4),
+            "probability": None
+            if self.out_of_range_reason
+            else round(self.probability, 4),
             "band": self.band,
             "band_label": self.band_label,
             "affordability": self.affordability.to_dict(),
@@ -205,14 +208,17 @@ class Assessor:
         affordability = compute_affordability(app, self.config)
         rules = evaluate_rules(app, affordability, self.config)
 
-        factors = explain(
-            app=app,
-            baselines=self.bundle.baselines,
-            score_applications=self.score_many,
-            base_probability=probability,
-        )
-
         out_of_range_reason = _extrapolation_reason(app, features)
+        factors = (
+            explain(
+                app=app,
+                baselines=self.bundle.baselines,
+                score_applications=self.score_many,
+                base_probability=probability,
+            )
+            if out_of_range_reason is None
+            else []
+        )
 
         suggestions: list[Suggestion] = []
         # No guidance for someone already in the "likely" band (it would be
@@ -230,7 +236,7 @@ class Assessor:
                 config=self.config,
             )
 
-        band = self.band_for(probability)
+        band = "unavailable" if out_of_range_reason else self.band_for(probability)
         return Assessment(
             probability=probability,
             band=band,
@@ -256,14 +262,17 @@ class Assessor:
             zip(applications, probabilities, strict=True)
         ):
             affordability = compute_affordability(app, self.config)
-            band = self.band_for(probability)
+            reason = _extrapolation_reason(app, engineer(app, self.feature_rate))
+            band = "unavailable" if reason else self.band_for(probability)
             results.append(
                 {
                     "index": index,
                     "application": app.to_dict(),
-                    "probability": round(probability, 4),
+                    "probability": None if reason else round(probability, 4),
                     "band": band,
                     "band_label": BAND_LABELS[band],
+                    "out_of_range": reason is not None,
+                    "out_of_range_reason": reason,
                     "monthly_instalment": round(affordability.monthly_instalment, 2),
                     "emi_to_income": round(affordability.emi_to_income, 4),
                 }

@@ -60,12 +60,14 @@ PAGES = (
     "apply",
     "apply-with-errors",
     "result",
+    "result-unavailable",
     "how-it-works",
     "login",
     "signup",
     "not-found",
     "dashboard",
     "saved-application",
+    "saved-application-unavailable",
     "admin",
 )
 
@@ -180,14 +182,7 @@ def audit(live_server: str) -> dict[str, Any]:
         page.wait_for_load_state()
         check("apply-with-errors")
 
-        page.goto(live_server + "/signup")
-        page.fill("#user_id", "a11y_user")
-        page.fill("#full_name", "Access Ible")
-        page.fill("#email", "a11y@example.com")
-        page.fill("#password", "correct-horse-battery")
-        page.fill("#confirm_password", "correct-horse-battery")
-        page.click("form button")
-        page.wait_for_load_state()
+        _register_applicant(page, live_server)
         page.goto(live_server + "/apply")
         page.fill("#applicant_income", "60000")
         page.fill("#loan_amount", "1800000")
@@ -199,6 +194,14 @@ def audit(live_server: str) -> dict[str, Any]:
         page.get_by_role("link", name="View", exact=True).first.click()
         check("saved-application")
 
+        _submit_unavailable(page, live_server)
+        check("result-unavailable")
+        assert page.get_by_text("Estimate unavailable", exact=True).first.is_visible()
+        page.goto(live_server + "/dashboard")
+        page.get_by_role("link", name="View", exact=True).first.click()
+        check("saved-application-unavailable")
+        assert page.get_by_text("Estimate unavailable", exact=True).first.is_visible()
+
         _sign_in_as_admin(page, live_server)
         page.goto(live_server + "/admin/")
         check("admin")
@@ -206,6 +209,25 @@ def audit(live_server: str) -> dict[str, Any]:
 
         browser.close()
     return results
+
+
+def _submit_unavailable(page: Any, live_server: str) -> None:
+    page.goto(live_server + "/apply")
+    page.fill("#applicant_income", "0")
+    page.fill("#loan_amount", "1800000")
+    page.click("button[type=submit]")
+    page.wait_for_load_state()
+
+
+def _register_applicant(page: Any, live_server: str) -> None:
+    page.goto(live_server + "/signup")
+    page.fill("#user_id", "a11y_user")
+    page.fill("#full_name", "Access Ible")
+    page.fill("#email", "a11y@example.com")
+    page.fill("#password", "correct-horse-battery")
+    page.fill("#confirm_password", "correct-horse-battery")
+    page.click("form button")
+    page.wait_for_load_state()
 
 
 def _sign_in_as_admin(page: Any, live_server: str) -> None:

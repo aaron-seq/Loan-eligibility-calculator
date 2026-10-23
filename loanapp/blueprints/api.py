@@ -192,12 +192,13 @@ def compare() -> ResponseReturnValue:
         ), 400
 
     results = assessor.compare([s.to_application() for s in data.scenarios])
-    best = max(results, key=lambda r: r["probability"])
+    supported = [result for result in results if not result["out_of_range"]]
+    best = max(supported, key=lambda r: r["probability"], default=None)
     return jsonify(
         {
             "data": {
                 "scenarios": results,
-                "best_index": best["index"],
+                "best_index": best["index"] if best else None,
                 "disclaimer": DISCLAIMER,
             }
         }

@@ -23,7 +23,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 -- PRIMARY KEY, not a bare column: it is what gives INSERT OR IGNORE in
@@ -41,23 +41,33 @@ CREATE TABLE IF NOT EXISTS users (
     is_active     INTEGER NOT NULL DEFAULT 1,
     created_at    TEXT NOT NULL
 );
+"""
 
+APPLICATION_SCHEMA = """
 CREATE TABLE IF NOT EXISTS applications (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id        TEXT NOT NULL,
     label          TEXT NOT NULL DEFAULT '',
     payload        TEXT NOT NULL,   -- canonical LoanApplication JSON
     assessment     TEXT NOT NULL,   -- full assessment JSON
-    probability    REAL NOT NULL,
+    probability    REAL,
     band           TEXT NOT NULL,
     model_version  TEXT NOT NULL,
     created_at     TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE
+    FOREIGN KEY (user_id) REFERENCES users (user_id) ON DELETE CASCADE,
+    CHECK (
+        (probability IS NULL AND band = 'unavailable') OR
+        (probability IS NOT NULL AND probability BETWEEN 0 AND 1 AND
+         band IN ('likely', 'borderline', 'unlikely'))
+    )
 );
-
-CREATE INDEX IF NOT EXISTS idx_applications_user ON applications (user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_applications_created ON applications (created_at DESC);
 """
+
+APPLICATION_INDEXES = (
+    "CREATE INDEX IF NOT EXISTS idx_applications_user ON applications (user_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_applications_created ON applications (created_at DESC)",
+)
+SCHEMA += APPLICATION_SCHEMA + ";\n".join(APPLICATION_INDEXES) + ";"
 
 
 #: SQLite stores INTEGER as a signed 64-bit value and raises OverflowError on
@@ -136,16 +146,92 @@ def _enable_wal(conn: sqlite3.Connection) -> None:
 def initialise(database_path: str) -> None:
     with connect(database_path) as conn:
         _enable_wal(conn)
-        conn.executescript(SCHEMA)
-        # Unconditional INSERT OR IGNORE, with no SELECT first. The read was
-        # the bug: checking for an empty table and then inserting is
-        # check-then-act, and every gunicorn worker runs this path
-        # concurrently against one file, so several can all observe it empty.
-        # OR IGNORE against the PRIMARY KEY in SCHEMA makes the insert
-        # idempotent, which removes the race rather than narrowing it.
+        # executescript commits a pending transaction before running, so BEGIN
+        # belongs INSIDE the script. The surrounding connection helper commits
+        # only after migration succeeds, or rolls the entire operation back.
+        # IMMEDIATE serializes concurrent worker upgrades before schema reads.
+        conn.executescript("BEGIN IMMEDIATE;\n" + SCHEMA)
+        version = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+        if version is not None and version > SCHEMA_VERSION:
+            raise RuntimeError(
+                "Database schema is newer than this application; refusing to downgrade"
+            )
+        columns = {
+            row["name"]: row for row in conn.execute("PRAGMA table_info(applications)")
+        }
+        if columns["probability"]["notnull"]:
+            _migrate_unavailable_estimates(conn)
+        for statement in APPLICATION_INDEXES:
+            conn.execute(statement)
+        if conn.execute("PRAGMA foreign_key_check").fetchone() is not None:
+            raise RuntimeError("Database migration failed its foreign-key check")
         conn.execute(
             "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",
             (SCHEMA_VERSION,),
+        )
+        conn.execute("DELETE FROM schema_version WHERE version <> ?", (SCHEMA_VERSION,))
+
+
+def _migrate_unavailable_estimates(conn: sqlite3.Connection) -> None:
+    """Copy v1 records transactionally; never rescore historical applications.
+
+    Supported assessments are unchanged. Only records already flagged as outside
+    the model's range lose their unsupported score, band and model guidance.
+    Any malformed record aborts the upgrade without changing the old database.
+    """
+    previous_sequence = conn.execute(
+        "SELECT seq FROM sqlite_sequence WHERE name='applications'"
+    ).fetchone()
+    high_water = previous_sequence[0] if previous_sequence else 0
+    # Table identifiers are fixed application constants, never request input.
+    conn.execute(APPLICATION_SCHEMA.replace("applications (", "applications_next (", 1))
+    for row in conn.execute("SELECT * FROM applications ORDER BY id"):
+        try:
+            assessment = json.loads(row["assessment"])
+            if not isinstance(assessment, dict):
+                raise ValueError("expected an assessment object")
+        except (ValueError, TypeError) as exc:
+            raise RuntimeError(
+                f"Cannot migrate assessment record {row['id']}; repair a backup copy first"
+            ) from exc
+        probability, band = row["probability"], row["band"]
+        stored_json = row["assessment"]
+        if assessment.get("out_of_range"):
+            probability, band = None, "unavailable"
+            assessment.update(
+                probability=None,
+                band=band,
+                band_label="Estimate unavailable",
+                factors=[],
+                suggestions=[],
+            )
+            stored_json = json.dumps(assessment)
+        conn.execute(
+            """INSERT INTO applications_next
+               (id,user_id,label,payload,assessment,probability,band,model_version,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                row["id"],
+                row["user_id"],
+                row["label"],
+                row["payload"],
+                stored_json,
+                probability,
+                band,
+                row["model_version"],
+                row["created_at"],
+            ),
+        )
+    conn.execute("DROP TABLE applications")
+    conn.execute("ALTER TABLE applications_next RENAME TO applications")
+    updated = conn.execute(
+        "UPDATE sqlite_sequence SET seq=MAX(seq,?) WHERE name='applications'",
+        (high_water,),
+    )
+    if updated.rowcount == 0:
+        conn.execute(
+            "INSERT INTO sqlite_sequence(name,seq) VALUES ('applications',?)",
+            (high_water,),
         )
 
 
@@ -298,12 +384,13 @@ class ApplicationRepository:
         with connect(self.database_path) as conn:
             totals = conn.execute(
                 """SELECT COUNT(*) AS total,
+                          COUNT(probability) AS scored,
                           AVG(probability) AS mean_probability,
                           COUNT(DISTINCT user_id) AS applicants
                    FROM applications"""
             ).fetchone()
             bands = conn.execute(
-                "SELECT band, COUNT(*) AS n FROM applications GROUP BY band"
+                "SELECT band, COUNT(*) AS n FROM applications WHERE probability IS NOT NULL GROUP BY band"
             ).fetchall()
             by_day = conn.execute(
                 """SELECT substr(created_at, 1, 10) AS day, COUNT(*) AS n
@@ -316,8 +403,14 @@ class ApplicationRepository:
 
         return {
             "total": int(totals["total"] or 0),
+            "scored": int(totals["scored"]),
+            "unavailable": int(totals["total"] - totals["scored"]),
             "applicants": int(totals["applicants"] or 0),
-            "mean_probability": round(float(totals["mean_probability"] or 0.0), 4),
+            "mean_probability": (
+                round(float(totals["mean_probability"]), 4)
+                if totals["mean_probability"] is not None
+                else None
+            ),
             "bands": {r["band"]: int(r["n"]) for r in bands},
             "by_day": [{"day": r["day"], "count": int(r["n"])} for r in by_day],
             "model_versions": [
