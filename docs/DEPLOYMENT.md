@@ -98,6 +98,9 @@ no scripts, same-origin form targets, no frames or base URLs),
 `Referrer-Policy: same-origin` on HTML, JSON, errors, redirects and static
 responses. Keep assets in the committed stylesheet; inline scripts or styles
 will be blocked. See [Flask's security guidance](https://flask.palletsprojects.com/en/stable/web-security/).
+Dynamic responses also send `Cache-Control: no-store`; this does not erase
+previously cached copies or control screenshots/downloads. Static CSS retains
+its own cache policy.
 
 Terminate HTTPS at a trusted proxy and configure HSTS there after verifying
 the domain's TLS setup. The app does not send HSTS for local HTTP development.
@@ -190,7 +193,7 @@ artifacts you produced yourself or fetched over a channel you trust.
 ```json
 {
   "status": "ok",
-  "app_version": "2.1.0",
+  "app_version": "2.2.0",
   "model_status": "ready",
   "model": {
     "version": "…",
@@ -276,6 +279,35 @@ docker cp loanwise:/data/backup.db ./backup-$(date +%F).db
 Use SQLite's backup API, not a file copy — the database runs in WAL mode and a
 naive copy can capture a torn state. It goes through Python because the slim
 base image does not ship the `sqlite3` command-line tool.
+
+### Schema v2 upgrade
+
+Application 2.2.0 upgrades schema v1 automatically at startup in one
+`BEGIN IMMEDIATE` transaction. It makes scores nullable and removes model
+claims only from historical assessments already marked `out_of_range`.
+Supported assessments, owners, identifiers (including the deleted-ID high-water
+mark), timestamps and model versions are preserved; history is not rescored.
+The upgrade follows SQLite's [create/copy/drop/rename procedure](https://www.sqlite.org/lang_altertable.html).
+
+Before rollout, stop application writers, make a SQLite backup as above, and
+validate the upgrade on a disposable copy with the pinned runtime. The table
+copy needs free disk space and holds a write lock; production database size and
+upgrade duration have not been measured. Malformed historical assessment JSON
+aborts startup and rolls the schema/data changes back. Repair a backup copy
+after inspecting the affected record; do not delete real history to force startup.
+
+The new API has nullable probabilities and an `unavailable` band. Upgrade
+consumers first; see [API compatibility notes](API.md#out-of-range-applications).
+Older application code cannot safely use schema v2. To roll back, stop writers
+and restore the **pre-upgrade backup and previous application together** in a
+clean data location. Do not overwrite a live WAL database. Writes made after
+the backup require a separate reconciliation decision. Newer schema versions
+are refused rather than silently downgraded.
+
+Disposable tests cover supported/unsupported history, constraints, repeated and
+concurrent startup, failed-upgrade rollback and future-version refusal in
+[test_migrations.py](../tests/test_migrations.py). Actual-host recovery and
+deployment remain unverified.
 
 ### Scaling
 

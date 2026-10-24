@@ -6,6 +6,18 @@ change on a review branch is not evidence that it has reached the default branch
 
 Each item is tracked as a GitHub issue; the number links to it.
 
+## Now: assessment integrity and verification
+
+The [current milestone](https://github.com/aaron-seq/Loan-eligibility-calculator/milestone/1)
+selects #39, #41 and #42: unsupported-output integrity, controlled JSON rejection
+and dynamic-response cache policy. [Draft PR #44](https://github.com/aaron-seq/Loan-eligibility-calculator/pull/44)
+has implementation and validation evidence; review/integration remain pending.
+The [private Project](https://github.com/users/aaron-seq/projects/5) tracks execution.
+External private intake/scanning setup [#43](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/43)
+and current artifact provenance [#45](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/45)
+need evidence or owner decisions before a release claim. Existing feature ideas
+below remain sequenced proposals; no dates or capacity commitments are assigned.
+
 ## Known limitations shipping today
 
 These are real and documented in code. None is hidden.
@@ -121,7 +133,7 @@ template for similar tools elsewhere, which is one of its stated goals.
 
 ### 11. Accessibility audit ([#22](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/22))
 
-Chromium/axe now checks eleven pages with the real stylesheet and strict CSP.
+PR #44's Chromium/axe audit checks thirteen page states with the real stylesheet and strict CSP.
 Form-error associations, a skip link and text alternatives are covered. The
 manual screen-reader pass over apply, result and sign-in remains unfinished;
 automated checks do not satisfy that acceptance criterion.
@@ -131,8 +143,9 @@ automated checks do not satisfy that acceptance criterion.
 ## Engineering
 
 Built CSS ([#30](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/30)), strict mypy ([#27](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/27)) and
-response security headers ([#36](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/36)) are implemented in the review
-branch. The delivery PR links them for automatic closure when merged.
+response security headers ([#36](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/36)) merged through
+[PR #40](https://github.com/aaron-seq/Loan-eligibility-calculator/pull/40) and those issues are closed.
+Current draft work and verification gaps are linked in the milestone above.
 
 ### 14. Structured logging ([#29](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/29))
 

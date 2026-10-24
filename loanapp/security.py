@@ -56,6 +56,8 @@ def install_security_headers(app: Flask) -> None:
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "same-origin"
+        if request.endpoint != "static":
+            response.headers["Cache-Control"] = "no-store"
         return response
 
 
@@ -134,7 +136,9 @@ def validate_csrf() -> bool:
         return False
     supplied = request.headers.get(CSRF_HEADER) or request.form.get(CSRF_FORM_FIELD)
     if not supplied and request.is_json:
-        supplied = (request.get_json(silent=True) or {}).get(CSRF_FORM_FIELD)
+        payload = request.get_json(silent=True)
+        if isinstance(payload, dict):
+            supplied = payload.get(CSRF_FORM_FIELD)
     if not supplied:
         return False
     # Compare as bytes. hmac.compare_digest raises TypeError on a str

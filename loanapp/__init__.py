@@ -25,7 +25,7 @@ from .db import ApplicationRepository, UserRepository, initialise
 from .ml.registry import ModelContractError, ModelUnavailable, load_bundle
 from .security import install_csrf, install_security_headers
 
-__version__ = "2.1.0"
+__version__ = "2.2.0"
 
 
 def configure_logging(config: Config) -> None:

@@ -38,7 +38,7 @@
               {{ '{:,.0f}'.format(record.payload.loan_amount) }}
             </td>
             <td class="px-4 py-3 text-right tabular-nums font-medium">
-              {{ (record.probability * 100)|round|int }}%
+              {% if record.probability is not none %}{{ (record.probability * 100)|round|int }}%{% else %}Estimate unavailable{% endif %}
             </td>
             <td class="px-4 py-3">
               <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium

@@ -1,9 +1,11 @@
 # Repository review evidence — 2026-10-23
 
 Base: [`7ea3a46`](https://github.com/aaron-seq/Loan-eligibility-calculator/commit/7ea3a460adb3b5e5da79f606308300fb30ffc24a).
-Work branch: `codex/review-outputs-readme-issues`. No default-branch merge or
-deployment was performed. This appendix records supporting detail for the
-[README](../README.md); completed code on this branch still needs merge.
+Historical work branch: `codex/review-outputs-readme-issues`. The tests below
+record its premerge verification. [PR #40](https://github.com/aaron-seq/Loan-eligibility-calculator/pull/40)
+subsequently passed all seven [CI jobs](https://github.com/aaron-seq/Loan-eligibility-calculator/actions/runs/39922492056)
+and merged with explicit authorization as [`fcdad2d`](https://github.com/aaron-seq/Loan-eligibility-calculator/commit/fcdad2dff99c587a49e4d17931afd29456f2afa5).
+No deployment was performed. Current work is in the [security/testing checkpoint](security-testing-evidence.md#checkpoint-and-resume).
 
 ## Selected work and decisions
 

@@ -133,9 +133,9 @@ measurement. The checked-in [sample input](../examples/application.json) and
 
 Field notes:
 
-- **`probability`** — calibrated P(approve). `model.metrics` and
+- **`probability`** — calibrated P(approve), or `null` outside the model's usable range. `model.metrics` and
   `model.calibrated` describe how much weight it deserves.
-- **`band`** — `likely` (≥ 0.65) · `borderline` (≥ 0.40) · `unlikely`. Thresholds
+- **`band`** — `likely` (≥ 0.65) · `borderline` (≥ 0.40) · `unlikely`, or `unavailable` when no estimate is supported. Thresholds
   are configurable.
 - **`rules`** — `severity` is `pass` \| `warn` \| `fail`. Independent of the
   model; `rules_verdict` is the worst severity present. A `fail` here does not
@@ -153,12 +153,18 @@ Field notes:
 
 `POST /api/assess` includes `out_of_range` and `out_of_range_reason`.
 An application with no household income, or an implausible loan/instalment
-ratio, has no supported probability. The browser hides its percentage.
-The current JSON contract retains a numeric `probability` and model band;
-clients must ignore those values when `out_of_range` is true and show the
-rules and reason instead. `/api/compare` currently has no equivalent flag;
-do not treat its ranking of extreme inputs as supported model guidance.
-This validation gap is tracked in [#39](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/39).
+ratio, has no supported probability. Since application version **2.2.0**,
+these results return `probability: null`, `band: "unavailable"`,
+`band_label: "Estimate unavailable"`, and empty `factors`/`suggestions`.
+Affordability, rules, reason and model provenance remain available.
+This intentionally changes the previous numeric-score contract: consumers must
+handle nullable probabilities and the additional band before upgrading.
+[#39](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/39)
+tracks the change.
+
+The same invariant holds in saved history, including records already flagged
+unsupported by the schema-v1 application. The schema-v2 upgrade preserves
+supported history without rescoring it; see [upgrade and recovery](DEPLOYMENT.md#schema-v2-upgrade).
 
 ---
 
@@ -187,6 +193,10 @@ curl -s localhost:5000/api/compare -H 'Content-Type: application/json' -d '{
 ```
 
 Validation errors are keyed by index: `scenarios.1.loan_amount`.
+Each scenario includes `out_of_range` and `out_of_range_reason`; unsupported
+scenarios have a null probability and unavailable band. `best_index` selects
+only supported scenarios and is `null` when none qualify. Instalments remain
+available even when the model cannot estimate an outcome.
 
 ---
 
@@ -227,8 +237,9 @@ Only needed by clients that hold a session cookie.
 Every query is scoped by `user_id` **in the SQL**. Another user's application
 returns `404`, not `403` — existence is not disclosed.
 
-Saved assessments are returned exactly as recorded. They are not re-scored
-against a newer model, so history shows what the applicant was actually told.
+Supported saved assessments are returned as recorded. They are not re-scored
+against a newer model. The schema-v2 upgrade removes unsupported model claims
+from historical records already flagged out of range.
 `model_version` records which model produced it; estimates from different
 versions are not directly comparable.
 
@@ -241,7 +252,7 @@ safe to scrape:
 
 ```json
 { "data": {
-    "total": 128, "applicants": 41, "mean_probability": 0.58,
+    "total": 128, "scored": 128, "unavailable": 0, "applicants": 41, "mean_probability": 0.58,
     "bands": { "likely": 61, "borderline": 40, "unlikely": 27 },
     "by_day": [ { "day": "2026-07-29", "count": 12 } ],
     "model_versions": [ { "version": "…", "count": 128 } ],
@@ -251,6 +262,9 @@ safe to scrape:
 
 Administrators are created with `flask --app app create-admin`. There is no
 default account.
+`mean_probability` and `bands` use supported results only; the mean is `null`
+when `scored` is zero. Total, applicant, date and model-version counts still
+include unavailable results.
 
 ---
 
