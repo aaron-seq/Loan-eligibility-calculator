@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/aaron-seq/Loan-eligibility-calculator/actions/workflows/ci.yml/badge.svg)](https://github.com/aaron-seq/Loan-eligibility-calculator/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+![Code license](https://img.shields.io/badge/code-MIT-green)
 
 A Flask application for exploring historical loan approval patterns, monthly
 repayments, and changes to an application. Applicants can assess anonymously;
@@ -159,7 +159,11 @@ records issue/PR dispositions, tests personally run and remaining validation gap
 The current [security and testing evidence](docs/security-testing-evidence.md)
 maps the bounded review to regression tests and open findings. Read
 [SECURITY.md](SECURITY.md) before reporting sensitive information.
+The [maintainer index](docs/README.md) links the Project, current milestone,
+review workflow and continuation steps.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Original author: Aaron Emmanuel Xavier Sequeira.
+Project code: MIT — see [LICENSE](LICENSE) and preserved [historical notices](THIRD_PARTY_NOTICES.md).
+Dataset and model provenance/redistribution evidence remains unresolved in
+[#45](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/45); see the [provenance appendix](docs/artifact-provenance.md).

@@ -30,9 +30,12 @@ sampling error — the cross-validated ROC-AUC ranges from
 this as a well-engineered demonstration of a decisioning pipeline, not as a
 model validated for production credit underwriting.
 
-The data is a public loan-application dataset. It carries whatever historical
-bias the original approval decisions contained; a model fit to it reproduces
-those patterns, including any that were unfair.
+The original publisher, applicable dataset terms and model redistribution basis
+are not verified; see [artifact provenance](artifact-provenance.md) and
+[#45](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/45).
+The local fingerprint identifies the file, not its licensing or collection
+history. Historical approval decisions can contain bias; fitting them can
+reproduce unfair patterns.
 
 ## Performance (holdout, never used for model selection)
 
