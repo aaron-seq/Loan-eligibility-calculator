@@ -30,8 +30,9 @@ sampling error — the cross-validated ROC-AUC ranges from
 this as a well-engineered demonstration of a decisioning pipeline, not as a
 model validated for production credit underwriting.
 
-The original publisher, applicable dataset terms and model redistribution basis
-are not verified; see [artifact provenance](artifact-provenance.md) and
+Analytics Vidhya distributes matching training/test CSVs. The original collector,
+historical dataset terms and model redistribution basis remain unverified;
+see [artifact provenance](artifact-provenance.md) and
 [#45](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/45).
 The local fingerprint identifies the file, not its licensing or collection
 history. Historical approval decisions can contain bias; fitting them can

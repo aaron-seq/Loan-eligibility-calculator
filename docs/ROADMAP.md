@@ -6,16 +6,22 @@ change on a review branch is not evidence that it has reached the default branch
 
 Each item is tracked as a GitHub issue; the number links to it.
 
-## Now: assessment integrity and verification
+## Now: source evidence and reporting/scanning decisions
 
-The [current milestone](https://github.com/aaron-seq/Loan-eligibility-calculator/milestone/1)
-selects #39, #41 and #42: unsupported-output integrity, controlled JSON rejection
-and dynamic-response cache policy. [Draft PR #44](https://github.com/aaron-seq/Loan-eligibility-calculator/pull/44)
-has implementation and validation evidence; review/integration remain pending.
-The [private Project](https://github.com/users/aaron-seq/projects/5) tracks execution.
+The [closed assessment milestone](https://github.com/aaron-seq/Loan-eligibility-calculator/milestone/1)
+delivered #39, #41 and #42: unsupported-output integrity, controlled JSON rejection
+and dynamic-response cache policy. [PR #44](https://github.com/aaron-seq/Loan-eligibility-calculator/pull/44)
+merged into main as `bbf1441`; all seven [post-merge CI jobs](https://github.com/aaron-seq/Loan-eligibility-calculator/actions/runs/40082400881)
+passed. No release or deployment followed from that merge.
+The [private Project](https://github.com/users/aaron-seq/projects/5) tracks execution;
+[milestone 2](https://github.com/aaron-seq/Loan-eligibility-calculator/milestone/2)
+holds the remaining source/reporting outcome.
 External private intake/scanning setup [#43](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/43)
 and current artifact provenance [#45](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/45)
-need evidence or owner decisions before a release claim. Existing feature ideas
+remain open. Matching Analytics Vidhya downloads now support the provenance
+record, but historical terms and redistribution rights remain unverified.
+The four-feature setup proposal in #43 awaits explicit settings authorization.
+Existing feature ideas
 below remain sequenced proposals; no dates or capacity commitments are assigned.
 
 ## Known limitations shipping today
