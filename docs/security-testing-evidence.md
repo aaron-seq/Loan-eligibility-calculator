@@ -12,13 +12,15 @@ This is a publication-safe appendix, not a complete security assessment.
 | [#39](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/39) | Confirmed correctness defect; P1 | Unsupported scores appeared in API/history/comparison and aggregates. Return null/unavailable consistently, retain rules/costs, rank supported scenarios only, preserve supported historical results |
 | [#41](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/41) | Confirmed input defect; Low technical impact, P2 | Non-object JSON raised request exceptions. Return controlled 4xx without writes; preserve valid JSON/forms and CSRF |
 | [#42](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/42) | Privacy hardening / verification gap; P2 | Dynamic responses lacked `no-store`. Verify headers on private/account/error paths while retaining static caching. No cache disclosure was demonstrated |
-| [#43](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/43) | Reporting/scanning configuration gap; Informational, P2 | External private intake is disabled; hosted scanning coverage is unavailable. Deferred configuration decision; see SECURITY.md |
-| [#45](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/45) | Artifact provenance evidence gap; P2 | Current CSVs are inherited unchanged after newline normalization, but original publisher/terms and model redistribution evidence are unverified. Historical MIT notice preserved; no relicense or legal approval |
+| [#43](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/43) | Reporting/scanning configuration gap; Informational, P2 | External private intake and hosted scanning remain disabled/unconfigured in the latest settings read (2026-10-24). Four-feature setup proposal awaits authorization; see the issue and SECURITY.md |
+| [#45](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/45) | Artifact provenance evidence gap; P2 | Matching Analytics Vidhya downloads verified on 2026-10-25. Original collector, historical terms and redistribution basis remain unverified; see the [appendix](artifact-provenance.md). Historical MIT notice preserved; no relicense or legal approval |
 
 The [milestone](https://github.com/aaron-seq/Loan-eligibility-calculator/milestone/1)
 requires #39/#41/#42 behavior, migration and trust-boundary regressions, real
 browser checks, current-head CI and accurate consumer/upgrade documentation.
-No production deployment or exposure-resolution claim follows from a draft PR.
+These criteria were met and the milestone closed after PR #44 merged and
+post-merge CI passed. No production deployment or exposure-resolution claim
+follows from that merge.
 
 ## Threat model and boundaries
 
@@ -173,21 +175,45 @@ The documentation agent identified the provenance/attribution gap. The
 orchestrator verified current docs, the original Git notice and normalized
 identities of both CSVs, created #45, preserved the full historical notice and
 updated the generator/model card without changing data, metrics or model bytes.
-No original publisher or dataset rights were established. A concise
+At that stage no distributor or dataset rights were established. The later
+matching-download evidence is in the [provenance appendix](artifact-provenance.md);
+rights questions remain unresolved. A concise
 [maintainer index](README.md) records the tracking and contribution workflow.
 
 ## Checkpoint and resume
 
-Last verified: **2026-10-24 14:29 Asia/Kolkata (08:59 UTC)**. Branch
-`codex/39-assessment-integrity`, base `fcdad2d`,
-[draft PR #44](https://github.com/aaron-seq/Loan-eligibility-calculator/pull/44).
-The implementation at `dad67bc` passed all seven CI jobs. The Version 7 follow-up
-refreshes documentation, notice provenance and generated model-card wording;
-the PR records its final head and corresponding CI. No merge, release,
-deployment or advisory publication has occurred in this delivery.
+Last verified: **2026-10-25**. [PR #44](https://github.com/aaron-seq/Loan-eligibility-calculator/pull/44)
+merged with explicit authorization on 2026-10-24 as main
+[`bbf1441`](https://github.com/aaron-seq/Loan-eligibility-calculator/commit/bbf1441b9655626b612526d790219727642c5238).
+All seven [final-head CI jobs](https://github.com/aaron-seq/Loan-eligibility-calculator/actions/runs/40080300294)
+and all seven [post-merge CI jobs](https://github.com/aaron-seq/Loan-eligibility-calculator/actions/runs/40082400881)
+passed. Main's tree matches the tested PR head `76f636c`. Issues #39/#41/#42
+are closed as completed and milestone 1 is closed. No release, deployment or
+advisory publication occurred.
+
+Current follow-up branch: `codex/45-source-verification`, based on `bbf1441`.
+It records primary-source download comparisons, updates the generated model-card
+wording and reconciles stale delivery references. Runtime behavior, data, model,
+metrics, dependency pins and license bytes are unchanged. Its delivery PR records
+the final head, focused checks and corresponding CI; earlier runs do not validate
+new commits.
+
+Personally run for this follow-up: **24 training tests passed**, Ruff lint/format
+passed and strict mypy passed across 18 source files. The model card was
+regenerated from the existing metrics/bundle, without retraining. A fresh
+read-only same-system agent independently reproduced the three download hashes,
+row/field comparisons and card output, checked relative link targets, and found
+no actionable diff issue. The orchestrator reproduced the download comparisons
+and generation and verified that protected artifact bytes have no diff. This
+review is technical evidence, not independent human review or rights approval.
 
 The [private Project](https://github.com/users/aaron-seq/projects/5) has
-#39/#41/#42 and PR #44 in **In review / Retest**; #43 and #45 remain Todo/P2.
+#39/#41/#42 and PR #44 in **Done**. #43 remains Todo/P2 pending the owner's
+settings decision; #45 remains open/P2 and moves to review when the source-evidence
+draft is published. Source identity is partial progress, not redistribution
+approval or acceptance of the issue's remaining criteria.
+[Milestone 2](https://github.com/aaron-seq/Loan-eligibility-calculator/milestone/2)
+holds this follow-up; it remains open while acceptance and owner decisions remain.
 Saved views are a current-milestone board plus triage and review tables.
 Description/README and statuses were read back. Automatic issue-close and
 closed/merged-to-Done workflows remain absent; explicit acceptance/retest governs
@@ -195,17 +221,16 @@ Done. No owners or dates were invented. The first status-view filter update had
 invalid GraphQL quoting; the corrected variable-based mutation was read back.
 No chart, timeline or behavior beyond these checks is claimed.
 
-Agents ran read-only, made no commits and left no worktrees/WIP. Material
-public test, rollback and provenance claims were personally checked as above;
-confidential review/verification is recorded separately. Local source changes
-are preserved in the delivery branch; current Git/PR state overrides an older
-snapshot. Existing deployment, manual accessibility, platform and scanner gaps
-remain stated above and in #43/#45; the milestone is not closed.
+Earlier review agents ran read-only; their material public test, rollback and
+provenance claims were personally checked as above. The follow-up source review
+and local platform diagnostic are recorded on the delivery PR when verified.
+Confidential review/verification stays in restricted records. Current Git/PR
+state overrides an older snapshot. Existing deployment, manual accessibility,
+platform and scanner gaps remain stated above and in #43/#45.
 
-Resume here: verify Git/PR/Project state and current-head CI. Read the PR and
-`tests/test_migrations.py` / `loanapp/db.py` before a merge decision. Rerun the
-commands above after code changes. Review nullable API consumers and a
-pre-upgrade backup before any separately authorized rollout. #43 needs an
+Resume here: verify Git/PR/Project state and current-head CI for the follow-up
+draft. Rerun appropriate checks after changes. Review nullable API consumers and
+a pre-upgrade backup before any separately authorized rollout. #43 needs an
 approved reporting/scanning setup; #45 needs source/terms evidence and a real
 maintainer disposition. Continue the existing roadmap without closing unfinished
 enhancements. Read restricted advisory/patch state only through authorized

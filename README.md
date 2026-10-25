@@ -165,5 +165,6 @@ review workflow and continuation steps.
 ## License
 
 Project code: MIT — see [LICENSE](LICENSE) and preserved [historical notices](THIRD_PARTY_NOTICES.md).
-Dataset and model provenance/redistribution evidence remains unresolved in
+Analytics Vidhya distributes matching CSVs; the original collector, historical
+terms and dataset/model redistribution basis remain unresolved in
 [#45](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/45); see the [provenance appendix](docs/artifact-provenance.md).
