@@ -1,11 +1,7 @@
 """Environment-driven configuration.
 
-Design rule: **fail closed in production, be convenient in development.**
-The previous implementation fell back to ``os.urandom(24)`` for the secret key,
-which looks secure but silently breaks every session as soon as a second
-worker (or a second serverless invocation) starts with a different key. Here a
-missing ``SECRET_KEY`` is fatal in production and generates an explicitly
-labelled ephemeral key in development.
+A missing ``SECRET_KEY`` is fatal in production; development uses an ephemeral
+key whose sessions cannot survive restarts or span workers.
 """
 
 from __future__ import annotations
@@ -36,15 +32,8 @@ class ConfigError(RuntimeError):
 def load_env_file(path: Path) -> bool:
     """Load ``KEY=value`` pairs from a ``.env`` file into the environment.
 
-    Called by the process entrypoint (``app.py``), deliberately not from
-    :func:`load_config`: the library reads ``os.environ`` and nothing else, so
-    tests and embedders are never affected by a developer's local file.
-
-    ``override=False`` is the important argument. A real environment variable
-    always wins, so a ``.env`` left lying around can never silently replace a
-    production secret. ``.dockerignore`` also keeps the file out of the image.
-
-    Returns whether a file was found, so callers can log it if they wish.
+    The entrypoint loads the file; ``load_config`` reads only ``os.environ``.
+    Existing environment values win. Returns whether the file was found.
     """
     if not path.is_file():
         return False
@@ -60,12 +49,7 @@ _FALSE = ("0", "false", "no", "off")
 
 
 def _bool(name: str, default: bool) -> bool:
-    """Parse a boolean, refusing anything unrecognised.
-
-    Unrecognised used to mean False, which fails open for
-    ``SESSION_COOKIE_SECURE``: a typo of "true" sent the session cookie over
-    plain HTTP with no sign anything was wrong.
-    """
+    """Reject unknown spellings so security settings cannot fail open on typos."""
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
         return default

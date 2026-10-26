@@ -2,15 +2,7 @@
 
 ## The short version
 
-**Deploy the container.** The application is stateful — accounts, saved
-applications, an admin view — and a container gives it a real filesystem and a
-persistent volume.
-
-Serverless (Vercel, Lambda) is **not a supported target** and `vercel.json` has
-been removed. That is a real constraint, not a configuration problem, and the
-reasoning is below.
-
----
+Use one Linux container with a persistent local volume, a stable production secret and HTTPS at a trusted proxy. Multi-instance stateful hosting needs a network database first.
 
 ## Required configuration
 
@@ -22,7 +14,7 @@ reasoning is below.
 | `MODEL_DIR` | no | Defaults to `./models` |
 | `TRUSTED_PROXY` | only behind a proxy | Boolean. Makes rate limiting trust `X-Forwarded-For` |
 | `TRUSTED_PROXY_DEPTH` | no | Proxies in front of the app, default `1`. Read the client IP this many hops from the right of `X-Forwarded-For` |
-| `WEB_CONCURRENCY` | no | gunicorn worker processes (Docker default 2). **Set to the CPU count**: throughput scales linearly with processes, not threads — see [`BENCHMARKS.md`](BENCHMARKS.md) |
+| `WEB_CONCURRENCY` | no | gunicorn worker processes (Docker default 2). Tune for host CPU/memory and measure; see [benchmarks](BENCHMARKS.md) |
 | `RATE_LIMIT_PREDICT` | no | `<requests>/<seconds>`, default `30/3600`. Raise it if many users share one IP (corporate NAT) |
 | `RATE_LIMIT_LOGIN` / `RATE_LIMIT_REGISTER` | no | Same format; defaults `10/300` and `5/3600`. A malformed value stops the app from starting |
 | `SESSION_COOKIE_SECURE` | no | Boolean. Defaults to true in production |
@@ -30,12 +22,7 @@ reasoning is below.
 | `APPROVE_THRESHOLD` / `BORDERLINE_THRESHOLD` | no | Decision bands, `0 < borderline < approve < 1` |
 
 Booleans accept `true`/`false`, `1`/`0`, `yes`/`no` or `on`/`off`, in any case.
-Anything else stops the app at startup. Unrecognised values used to be
-treated as false, so `SESSION_COOKIE_SECURE=ture` quietly sent the session
-cookie over plain HTTP, and `TRUSTED_PROXY=false` — read as "any non-empty
-string" — *enabled* trust in the spoofable header.
-
-Requires Python 3.11 or newer; numpy, pandas and scikit-learn set that floor.
+Unknown spellings fail startup. Supported/tested Python versions are 3.11–3.13.
 
 Generate a secret key:
 
@@ -43,12 +30,7 @@ Generate a secret key:
 python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-**There is no fallback.** The previous version defaulted to `os.urandom(24)`,
-which looks secure and silently breaks every session the moment a second worker
-starts with a different key — an intermittent "randomly logged out" bug that is
-miserable to diagnose. Failing at boot with a message is better.
-
----
+Store the key securely and reuse it across workers/restarts.
 
 ## Docker (recommended)
 
@@ -67,6 +49,10 @@ The image runs as a non-root user, serves via gunicorn, and includes a
 healthcheck. `/data` is the volume mount — the database lives there so it
 survives a container replacement.
 
+The build context explicitly allows runtime sources/assets, the training CSV
+and code notices. Add new runtime asset paths to `.dockerignore` when needed.
+The test CSV stays in the repository and is not copied into the image.
+
 Create the first administrator:
 
 ```bash
@@ -81,14 +67,7 @@ bucket per request.
 
 ### Platforms this image runs on unchanged
 
-Use a Linux host that supports this container with a writable persistent local
-volume at `/data`. Check storage durability, SQLite locking semantics and
-backup/restore on the actual host before deploying. A provider accepting a
-container image does not establish those properties. Managed multi-instance
-or ephemeral hosting requires a network database first; see [#24](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/24).
-
-No hosted deployment or disaster-recovery exercise was performed in the
-[2026-10-23 review](engineering-evidence.md).
+Verify the actual host's persistent local storage, SQLite locking and backup/restore before rollout. A provider accepting an image does not establish those properties. No hosted deployment or actual-host recovery is claimed.
 
 ### Browser policy and TLS
 
@@ -109,80 +88,25 @@ the domain's TLS setup. The app does not send HSTS for local HTTP development.
 
 ## Why not serverless
 
-`vercel.json` used to be in this repository. It was removed, because the
-application is stateful and the platform cannot hold that state.
+No maintained Vercel/Lambda deployment configuration is provided for this stateful application.
 
 ### What would work
 
-Anonymous assessment — the form, the result page, factor explanations,
-guidance, affordability, `/api/assess`, `/api/compare`, `/api/model-card`.
+Anonymous assessment/compare and model-information endpoints can operate without persistent accounts.
 
 ### What cannot
 
-Accounts, sign-in, saved applications, and the admin view. Three reasons, none
-fixable by configuration:
-
-1. **The filesystem is read-only outside `/tmp`.** SQLite cannot open a
-   writable database anywhere else.
-2. **`/tmp` does not persist.** It is destroyed on cold start.
-3. **`/tmp` is not shared between instances.** A user can register and be
-   signed out moments later because the next request landed on a different
-   instance whose database has never heard of them.
-
-A config that silently loses user data is worse than no config, so the honest
-move was to delete it rather than ship it with a caveat in the README.
-
-`loanapp/config.py` still detects `VERCEL` and `AWS_LAMBDA_FUNCTION_NAME`,
-defaults `DATABASE_PATH` to `/tmp`, and logs a warning — so anyone who deploys
-there deliberately gets a working anonymous-assessment demo and an explicit
-statement that nothing persists. It is just not a path this project recommends
-or maintains config for.
-
-The 50 MB lambda bundle limit is also tight with pandas and scikit-learn.
-
----
+Accounts/history/admin data need persistent shared state. The compatibility fallback detects `VERCEL`/`AWS_LAMBDA_FUNCTION_NAME`, selects `/tmp` and warns; that filesystem is ephemeral and not shared across instances. This fallback is not supported stateful hosting.
 
 ## Postgres migration
 
-SQLite is the right choice for a single container at this scale. Move when any
-of these becomes true:
-
-- More than one application instance needs to write
-- Concurrent writes are producing `database is locked` errors
-- You need point-in-time recovery or a managed backup story
-- The applications table passes a few million rows
-
-The work is contained: `loanapp/db.py` holds every SQL statement, all
-parameterised, all behind two repository classes. The blueprints never touch
-SQL. A port means rewriting that one module and swapping `connect()` for a
-connection pool — the domain and HTTP layers are untouched.
-
-The schema is deliberately narrow (JSON payload plus indexed columns) precisely
-so this port stays small.
-
----
+Move before multiple instances write, or when contention/recovery/storage needs exceed one local database. SQL lives in `loanapp/db.py`; a port needs repositories, pooling, migration and backend tests. It remains [#24](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/24).
 
 ## Model artifacts
 
-The trained bundle (`models/loan_model.joblib`, ~1 MB) is **committed to the
-repository**. This is a deliberate trade:
+The committed bundle/metrics support clone-and-run and contract checks; Docker trains independently at build time. Commit bundle, metrics and generated card together after feature/ML-library changes. [Provenance](artifact-provenance.md) records unresolved distribution evidence.
 
-- **For:** the app works immediately after clone, and CI can verify that the
-  committed bundle still matches the feature contract in the code.
-- **Against:** a binary in git history, and the bundle must be regenerated
-  whenever `FEATURE_COLUMNS` changes.
-
-CI guards the failure mode. If you change the feature set without retraining,
-`test_registry.py` fails and the `train` job fails.
-
-At larger scale, move to a model registry (MLflow, S3 with versioned keys) and
-fetch at startup. The bundle already carries a version string and metadata, so
-the loader would barely change.
-
-**Security note:** `joblib.load` executes pickled code. Only point `MODEL_DIR` at
-artifacts you produced yourself or fetched over a channel you trust.
-
----
+**Only load trusted artifacts:** `joblib.load` can execute pickled code.
 
 ## Operations
 
@@ -311,16 +235,7 @@ deployment remain unverified.
 
 ### Scaling
 
-Scale up before scaling out. A full assessment costs about 33 ms of CPU and
-holds the GIL, so throughput tracks worker *processes*: on 4 CPUs, measured
-20.9 / 41.2 / 86.3 req/s at 1 / 2 / 4 workers ([`BENCHMARKS.md`](BENCHMARKS.md)).
-Set `WEB_CONCURRENCY` to the CPU count and give the container more CPUs before
-anything else. Each worker loads its own copy of the model.
-
-Before adding instances, move to Postgres. SQLite has a single writer, and two
-instances pointed at the same volume will produce lock contention.
-
----
+Measure worker-process throughput and model memory on the target host. Historical figures and limits are in [benchmarks](BENCHMARKS.md). Rate limits are process-local and SQLite has one writer; use a shared limiter/network database before horizontal scaling.
 
 ## Troubleshooting
 
@@ -359,8 +274,7 @@ over `MODEL_DIR` that holds an older one.
 ### A setting in `.env` is ignored
 
 A real environment variable of the same name wins over `.env`, by design: a
-stray file must never replace a production secret. Check what the process
-actually sees (`docker exec loanwise env`, or your platform's settings). Also
+stray file must never replace a production secret. Inspect only the named setting in the deployment configuration; never dump the process environment. Also
 check the location: the file is read from next to `app.py`, not from the
 current directory. `.dockerignore` keeps it out of the image, so containers
 never read one.

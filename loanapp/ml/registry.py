@@ -62,8 +62,8 @@ def _runtime_versions() -> dict[str, str]:
 def _minor(version: str) -> str:
     """``"1.9.1"`` -> ``"1.9"``.
 
-    Patch releases do not change pickle layout, and refusing to load across one
-    would turn a security patch into an outage. Minor and major releases do.
+    Local compatibility policy permits patch drift; deployments still use
+    exact dependency pins. See docs/ARCHITECTURE.md.
     """
     parts = version.split(".")
     return ".".join(parts[:2]) if len(parts) >= 2 else version

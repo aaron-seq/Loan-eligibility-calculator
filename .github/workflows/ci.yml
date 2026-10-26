@@ -1,8 +1,5 @@
 name: CI
 
-# The original workflow ran `pytest -q || true`, so it was permanently green
-# and never installed the test dependencies. Nothing here swallows a failure.
-
 on:
   push:
     branches: [main]
@@ -39,6 +36,7 @@ jobs:
         run: |
           python scripts/smoke_http.py --base-url http://127.0.0.1:8123
           test "$(docker exec loanwise-ci id -u)" = "10001"
+          docker exec loanwise-ci sh -c 'test -s data/train.csv && test ! -e data/test.csv && test -s LICENSE && test -s THIRD_PARTY_NOTICES.md'
           for attempt in $(seq 1 30); do
             if [ "$(docker inspect --format '{{.State.Health.Status}}' loanwise-ci)" = healthy ]; then
               exit 0
@@ -121,9 +119,6 @@ jobs:
           fi
 
       - name: Type check
-        # Strict, across the whole package. On its first run this found a
-        # wrong return annotation in the trainer and a schema helper that
-        # erased the concrete type at every call site.
         run: mypy
 
       - name: Test
@@ -144,9 +139,6 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       - name: Audit dependencies for known vulnerabilities
-        # This job exists because it caught a real problem: the first pass at
-        # this rewrite pinned Flask 3.0.3 / Werkzeug 3.0.3 / python-dotenv
-        # 1.0.1, which between them carried 15 published advisories.
         run: pip-audit -r requirements.txt -r requirements-dev.txt --strict
 
       - name: Static security scan
