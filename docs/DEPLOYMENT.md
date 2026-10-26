@@ -34,12 +34,15 @@ Store the key securely and reuse it across workers/restarts.
 
 ## Docker (recommended)
 
+Export `SECRET_KEY` through your shell/deployment secret configuration before
+running this example; reuse it when replacing the container.
+
 ```bash
 docker build -t loanwise .
 
 docker run -d --name loanwise -p 8000:8000 \
   -e WEB_CONCURRENCY="$(nproc)" \
-  -e SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')" \
+  -e SECRET_KEY \
   -e FLASK_ENV=production \
   -v loanwise-data:/data \
   loanwise
