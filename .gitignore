@@ -22,7 +22,6 @@ loan_env/
 htmlcov/
 .ruff_cache/
 .mypy_cache/
-.benchmarks/
 
 # The trained bundle is committed on purpose (see docs/DEPLOYMENT.md), but
 # nothing else in models/ is.
