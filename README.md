@@ -62,37 +62,23 @@ The CLI prompts for a password. There is no default administrator account.
 
 ## Implemented techniques
 
-| Technique | What it provides | Implementation / evidence |
-|---|---|---|
-| Shared feature engineering and versioned model bundles | The same eleven features, order, training rate and library checks at serving time | [Features](loanapp/features.py), [registry](loanapp/ml/registry.py), [architecture](docs/ARCHITECTURE.md) |
-| Scikit-learn pipelines | Imputation and scaling fitted inside each validation fold | [Trainer](loanapp/ml/train.py) |
-| Repeated stratified cross-validation | Candidate comparison with fold variability, plus a separate 20% holdout | [Generated model card](docs/MODEL.md) |
-| Sigmoid calibration selected on training CV | Paired outer-fold Brier comparison; inner folds fit calibration; holdout labels do not select it | [Trainer tests](tests/test_training.py), [metrics](models/metrics.json) |
-| Response-surface and fairness diagnostics | Loan-amount monotonicity screens and group outcome summaries; neither proves global monotonicity or fairness | [Model card](docs/MODEL.md) |
-| Input ablation and counterfactual guidance | Batched rescoring explains inputs and ranks candidate changes; contributions ignore interactions and do not sum to the estimate | [Explainer](loanapp/explain.py), [benchmarks](docs/BENCHMARKS.md) |
-| Separate affordability rules | Amortised instalments, interest and credit checks remain distinct from the model estimate | [Rules](loanapp/rules.py) |
-| Validated requests and protected sessions | Pydantic schemas, scrypt passwords, CSRF, session rotation, SQL ownership checks, and per-process rate limits | [Schemas](loanapp/schemas.py), [security](loanapp/security.py) |
-| Browser hardening and local styles | Strict CSP, frame protection, nosniff, referrer policy and dynamic-response `no-store`; committed Tailwind CSS | [Header tests](tests/test_response_headers.py), [boundary tests](tests/test_request_boundaries.py) |
-| Transactional history upgrades and ownership tests | SQLite schema v2 suppresses unsupported estimates; tested rollback, concurrent startup and cross-account denials | [Migration tests](tests/test_migrations.py), [actor matrix](tests/test_trust_boundaries.py) |
-| Reproducible engineering checks | Strict mypy, Ruff, pytest/coverage, Chromium/axe, dependency audits, static scans, retraining and CSS freshness gates | [CI](.github/workflows/ci.yml), [review evidence](docs/engineering-evidence.md) |
-| Stateful deployment | Flask app factory, blueprints, SQLite WAL, persistent Docker volume, non-root image and configurable workers | [Deployment](docs/DEPLOYMENT.md) |
+Shared training/serving features, scikit-learn pipelines, repeated stratified CV
+and training-only calibration selection support the estimates. Input ablation,
+counterfactual guidance and separate affordability rules explain their limits.
+Pydantic validation, CSRF, ownership checks and browser headers protect the
+request boundary. See [architecture and contracts](docs/ARCHITECTURE.md).
+
+The [model card](docs/MODEL.md) records metrics and sampling limits. Its holdout
+results describe the evaluation estimator before the serving refit on all 614
+rows; approval history does not measure repayment risk. Unsupported inputs return
+`probability: null` and band `unavailable`, including saved history and comparison
+rankings; rules remain available. See the [API contract](docs/API.md#out-of-range-applications)
+and [schema upgrade](docs/DEPLOYMENT.md#schema-v2-upgrade).
 
 ## Model results and limits
 
-The [generated model card](docs/MODEL.md) and [metrics JSON](models/metrics.json)
-record the measured results and dataset fingerprint. The current calibrated
-logistic regression has holdout ROC-AUC **0.8031**, Brier loss **0.1702**, and
-accuracy **0.7967** at threshold 0.65 on 123 cases. Training CV ROC-AUC is
-**0.7284 ± 0.0538**. The served model passes the sampled loan-amount screen
-with **0 material reversals in 216 comparisons**.
-
-The final serving estimator is refitted on all 614 rows. The holdout metrics
-describe the evaluation estimator before that refit. Small samples, historical
-bias, and a lack of repayment data limit what these numbers establish.
-Extreme inputs return `probability: null` and band `unavailable`, including
-saved history and comparisons. Rules and affordability remain available.
-Comparisons rank supported estimates only. See the [API contract change](docs/API.md#out-of-range-applications)
-and [database upgrade/recovery steps](docs/DEPLOYMENT.md#schema-v2-upgrade).
+Use the generated [model card](docs/MODEL.md) and [metrics](models/metrics.json)
+as the authoritative results; historical benchmarks are in [BENCHMARKS.md](docs/BENCHMARKS.md).
 
 ## JSON API
 
@@ -107,9 +93,7 @@ The response includes probability, band, affordability, rules, factors,
 suggestions, model provenance and a disclaimer. Signed-in requests also save
 the result and require a CSRF token.
 
-For that sample, the 2026-10-23 local HTTP run returned probability `0.6734`,
-band `likely`, monthly instalment `14975.7`, and `saved: false`. Reproduce the
-check with `python scripts/smoke_http.py` while the server runs.
+Verify the running server with `python scripts/smoke_http.py`.
 
 `POST /api/compare` compares 2–5 scenarios through JSON. A comparison UI is
 [planned](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/19).
@@ -151,16 +135,10 @@ for Docker commands, admin creation, backups, proxy settings and health checks.
 `status` and `model_status` fields. Gunicorn production serving requires Unix
 or a Linux container.
 
-Rate limits remain per process and SQLite permits one writer at a time.
-Password recovery, a shared rate-limit store, multi-instance database support,
-larger outcome datasets and other unfinished capabilities are in the
-[roadmap](docs/ROADMAP.md). The [review evidence](docs/engineering-evidence.md)
-records issue/PR dispositions, tests personally run and remaining validation gaps.
-The current [security and testing evidence](docs/security-testing-evidence.md)
-maps the bounded review to regression tests and open findings. Read
-[SECURITY.md](SECURITY.md) before reporting sensitive information.
-The [maintainer index](docs/README.md) links the Project, current milestone,
-review workflow and continuation steps.
+Rate limits are per process; SQLite permits one writer at a time. Unfinished
+capabilities and acceptance criteria are in the [roadmap](docs/ROADMAP.md).
+The [maintainer index](docs/README.md) links verification evidence and delivery
+tracking. Read [SECURITY.md](SECURITY.md) before reporting sensitive information.
 
 ## License
 
