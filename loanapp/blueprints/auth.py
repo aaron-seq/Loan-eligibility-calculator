@@ -114,14 +114,18 @@ def login() -> ResponseReturnValue:
         current_app.logger.info("failed login for user_id=%s", data.user_id)
         return _respond(False, INVALID_CREDENTIALS, 401, url_for("pages.login"))
 
-    start_session(user)
-    current_app.logger.info("login user_id=%s", user["user_id"])
-
     destination = url_for("pages.dashboard")
     requested = request.args.get("next") or _payload().get("next")
     # Only accept same-site relative paths, or this becomes an open redirect.
-    if requested and requested.startswith("/") and not requested.startswith("//"):
+    if (
+        isinstance(requested, str)
+        and requested.startswith("/")
+        and not requested.startswith("//")
+    ):
         destination = requested
+
+    start_session(user)
+    current_app.logger.info("login user_id=%s", user["user_id"])
 
     return _respond(True, "Signed in.", 200, destination, redirect_to=destination)
 
