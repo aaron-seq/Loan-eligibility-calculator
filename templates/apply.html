@@ -126,9 +126,9 @@
           <label for="dependents" class="block text-sm font-medium text-slate-700">Dependents</label>
           <select id="dependents" name="dependents"
                   class="mt-1 w-full rounded-md border-slate-300 border px-3 py-2 text-sm">
-            {% for n in [0, 1, 2, 3] %}
+            {% for n in range(11) %}
               <option value="{{ n }}" {% if prefill.get('dependents', 0)|int == n %}selected{% endif %}>
-                {{ n }}{% if n == 3 %}+{% endif %}
+                {{ n }}
               </option>
             {% endfor %}
           </select>
