@@ -8,6 +8,14 @@ Each item is tracked as a GitHub issue; the number links to it.
 
 ## Now: source evidence and reporting/scanning decisions
 
+The [verified bug milestone](https://github.com/aaron-seq/Loan-eligibility-calculator/milestone/3)
+tracks #52–#58: account/redirect validation, affordability mathematics, saved
+scenario fidelity and the obsolete release command. Changes are being validated
+on `codex/52-verified-bug-remediation`; reviewable work remains open until
+integration. [Project 11](https://github.com/users/aaron-seq/projects/11) includes
+these bugs, the existing roadmap backlog and dependency PRs #47–#49. Feature
+proposals below remain separate from this bounded remediation.
+
 The [closed assessment milestone](https://github.com/aaron-seq/Loan-eligibility-calculator/milestone/1)
 delivered #39, #41 and #42: unsupported-output integrity, controlled JSON rejection
 and dynamic-response cache policy. [PR #44](https://github.com/aaron-seq/Loan-eligibility-calculator/pull/44)
