@@ -72,7 +72,7 @@ def apply_form() -> ResponseReturnValue:
             prefill_id, user_id=user["user_id"]
         )
         if record:
-            prefill = record["payload"]
+            prefill = {**record["payload"], "label": record["label"]}
 
     return render_template(
         "apply.html",

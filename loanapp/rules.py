@@ -69,12 +69,11 @@ def compute_affordability(app: LoanApplication, config: Config) -> Affordability
 
     if app.loan_term_months <= 0:
         max_affordable = 0.0
-    elif rate <= 0:
-        max_affordable = affordable_emi * app.loan_term_months
     else:
-        r = rate / 12
-        growth = (1 + r) ** app.loan_term_months
-        max_affordable = affordable_emi * (growth - 1) / (r * growth)
+        # Invert the same stable payment calculation used for the requested loan.
+        max_affordable = affordable_emi / monthly_instalment(
+            1.0, rate, app.loan_term_months
+        )
 
     return Affordability(
         monthly_instalment=emi,

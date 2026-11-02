@@ -238,8 +238,11 @@ def load_config(env: str | None = None) -> Config:
             "Require 0 < BORDERLINE_THRESHOLD < APPROVE_THRESHOLD < 1; got "
             f"{config.borderline_threshold} and {config.approve_threshold}"
         )
-    if not 0 <= config.annual_interest_rate < 1:
-        raise ConfigError("ANNUAL_INTEREST_RATE is a fraction, e.g. 0.105 for 10.5%")
+    if not (0 <= config.annual_interest_rate < 1 and 0 < config.max_emi_to_income <= 1):
+        raise ConfigError(
+            "Require 0 <= ANNUAL_INTEREST_RATE < 1 and 0 < MAX_EMI_TO_INCOME <= 1; "
+            "use finite fractions, e.g. 0.105 for 10.5%."
+        )
     if config.trusted_proxy_depth < 1:
         raise ConfigError(
             "TRUSTED_PROXY_DEPTH counts proxies in front of the app and must be "

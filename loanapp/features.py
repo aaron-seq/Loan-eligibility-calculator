@@ -163,11 +163,12 @@ def monthly_instalment(principal: float, annual_rate: float, term_months: int) -
     """
     if term_months <= 0:
         return 0.0
-    if annual_rate <= 0:
-        return principal / term_months
     r = annual_rate / 12
-    growth = (1 + r) ** term_months
-    return principal * r * growth / (growth - 1)
+    if r <= 0:
+        return principal / term_months
+    # log1p/expm1 preserve tiny positive rates that (1 + r) would round away.
+    repayment_factor = -math.expm1(-term_months * math.log1p(r))
+    return principal * (r / repayment_factor)
 
 
 def engineer(app: LoanApplication, annual_rate: float) -> dict[str, float]:

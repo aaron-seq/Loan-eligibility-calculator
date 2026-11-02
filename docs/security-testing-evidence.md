@@ -106,20 +106,44 @@ one maintained location: [artifact provenance](artifact-provenance.md).
 
 ## Checkpoint and resume
 
-Verified 2026-10-27: PR #44 merged as `bbf1441` with all seven [post-merge jobs](https://github.com/aaron-seq/Loan-eligibility-calculator/actions/runs/40082400881)
-passed. PR #46 merged as `de44c8b`, also with seven [post-merge jobs](https://github.com/aaron-seq/Loan-eligibility-calculator/actions/runs/40223312823)
-passed; its tree matches tested head `e79cca7`. Inspected published logs for that
-head report 318 passed/15 browser skips plus 15 passed in the dedicated browser
-job. Hosted checks cover Python 3.11–3.13, Unix startup and container
-non-root/custom-port health/persistence; local Docker verification remains unavailable.
+Verified 2026-11-01. Assessment PR #44, provenance documentation PR #46 and
+cleanup PR #51 are merged. Current main is `e1f72af`; all seven [cleanup
+post-merge jobs](https://github.com/aaron-seq/Loan-eligibility-calculator/actions/runs/40457165802)
+passed. Cleanup #50 is closed; the earlier local cache-deletion rejection left
+those generated files intact.
 
-Current cleanup: [#50](https://github.com/aaron-seq/Loan-eligibility-calculator/issues/50),
-branch `codex/50-repository-cleanup`, base `de44c8b`. Its PR records measured
-reductions and final validation; this historical evidence does not validate new
-commits. [Milestone 2](https://github.com/aaron-seq/Loan-eligibility-calculator/milestone/2)
-remains open for #43/#45. No release, deployment or advisory publication occurred.
+Active review branch: `codex/52-verified-bug-remediation`, based on `e1f72af`.
+[Milestone 3](https://github.com/aaron-seq/Loan-eligibility-calculator/milestone/3)
+and [Project 11](https://github.com/users/aaron-seq/projects/11) track #52–#58,
+their PR and current-head CI. Issues remain open until integration.
 
-Resume from live Git/PR/current-head CI, using the [maintainer index](README.md).
-Apply [nullable API](API.md#out-of-range-applications) and [backup/upgrade](DEPLOYMENT.md#schema-v2-upgrade)
-contracts before any separately authorized rollout. Keep confidential patch
-details out of public tracking; retain unfinished roadmap acceptance criteria.
+| Finding | Regression coverage |
+|---|---|
+| #52/#53: normalized admin creation; malformed login destination fallback | [Account boundaries](../tests/test_account_boundaries.py), real CLI-to-login/admin access |
+| #54/#55: finite affordability ceiling; stable zero/tiny-rate maths | [Numerical boundaries](../tests/test_affordability_boundaries.py), independent Decimal cash-flow oracle and API response |
+| #56–#58: remove obsolete release task; preserve saved inputs and warnings | Procfile review; [saved workflows](../tests/test_saved_workflows.py), browser form round-trips and historical values without rescoring |
+
+Three isolated implementers observed failing regressions before their fixes;
+the orchestrator reviewed and tested the integrated code. On Windows/Python
+3.13.7, personally run baseline/final suites passed **332 → 388 tests**, each
+with one expected Unix-only skip; branch-aware coverage rose **93.8% → 94.1%**.
+Browser checks were required. Ruff/format, strict mypy, Bandit and dependency
+audit passed on retry; the earlier Windows DLL blocks did not recur. Fresh
+training, byte-identical pinned CSS and disposable localhost HTTP smoke passed.
+The committed model/data/dependency pins are unchanged. Across all 614 training
+rows, default-rate feature/model-output differences were below `7e-15`.
+
+Local Docker remains unavailable. Hosted CI supplies Linux/container evidence
+for its exact PR head; inspect it before integration. Dependency PRs #47–#49
+received bounded diff/CI reviews; their earlier successful runs predate this
+branch, so current-base integration validation remains pending.
+
+[Milestone 2](https://github.com/aaron-seq/Loan-eligibility-calculator/milestone/2)
+remains open: #43 needs explicit settings approval; #45 needs historical
+terms/redistribution evidence and maintainer disposition. Manual screen-reader
+acceptance remains #22. Confidential patch details stay in restricted records.
+No release, deployment, security-setting change or advisory publication occurred.
+
+Resume by verifying live Git, the milestone PR and its current-head CI, then
+review the diff before a separately authorized merge. Apply the [nullable API](API.md#out-of-range-applications)
+and [backup/upgrade](DEPLOYMENT.md#schema-v2-upgrade) contracts before rollout.

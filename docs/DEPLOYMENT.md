@@ -109,6 +109,10 @@ Move before multiple instances write, or when contention/recovery/storage needs 
 
 The committed bundle/metrics support clone-and-run and contract checks; Docker trains independently at build time. Commit bundle, metrics and generated card together after feature/ML-library changes. [Provenance](artifact-provenance.md) records unresolved distribution evidence.
 
+The Procfile starts the web process using the committed bundle. Any retraining
+belongs in the build: [Heroku release-phase filesystem changes](https://devcenter.heroku.com/articles/release-phase#design-considerations)
+do not reach web dynos.
+
 **Only load trusted artifacts:** `joblib.load` can execute pickled code.
 
 ## Operations
