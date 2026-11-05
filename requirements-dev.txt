@@ -1,15 +1,15 @@
 -r requirements.txt
 
-pytest==9.1.1
+pytest==9.2.0
 pytest-cov==7.1.0
-ruff==0.17.1
-mypy==2.4.0
+ruff==0.17.3
+mypy==2.4.1
 # Fetches Tailwind's standalone binary, so styles build without Node.
 pytailwindcss==0.4.2
 
 # Accessibility audit (tests/test_a11y.py). axe-playwright-python bundles
 # axe-core, so this needs a browser but no Node. Tests skip without one.
-playwright==1.64.0
+playwright==1.64.1
 axe-playwright-python==0.1.8
 pandas-stubs==3.0.5.260914
 
