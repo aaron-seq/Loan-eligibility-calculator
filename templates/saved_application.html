@@ -39,18 +39,22 @@
     </dl>
   </section>
 
-  {% if a.out_of_range and a.affordability %}
+  {% if a.affordability or a.rules %}
     <section class="bg-white rounded-lg border border-slate-200 p-6">
-      <h2 class="font-semibold text-slate-900">What this loan would cost you</h2>
-      <p class="mt-2 text-sm text-slate-600">Monthly instalment:
-        <strong>{{ '{:,.0f}'.format(a.affordability.monthly_instalment) }}</strong>
-        at the recorded reference rate of {{ '%.2f'|format(a.affordability.annual_interest_rate * 100) }}% per year.
-      </p>
-      <ul class="mt-4 space-y-2 text-sm text-slate-700">
-        {% for rule in a.rules %}
-          <li><strong>{{ rule.severity|capitalize }}: {{ rule.title }}</strong> — {{ rule.detail }}</li>
-        {% endfor %}
-      </ul>
+      <h2 class="font-semibold text-slate-900">Recorded affordability and checks</h2>
+      {% if a.affordability %}
+        <p class="mt-2 text-sm text-slate-600">Monthly instalment:
+          <strong>{{ '{:,.0f}'.format(a.affordability.monthly_instalment) }}</strong>
+          at the recorded reference rate of {{ '%.2f'|format(a.affordability.annual_interest_rate * 100) }}% per year.
+        </p>
+      {% endif %}
+      {% if a.rules %}
+        <ul class="mt-4 space-y-2 text-sm text-slate-700">
+          {% for rule in a.rules %}
+            <li><strong>{{ rule.severity|capitalize }}: {{ rule.title }}</strong> — {{ rule.detail }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
     </section>
   {% endif %}
 

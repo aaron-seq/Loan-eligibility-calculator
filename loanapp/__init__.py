@@ -173,7 +173,7 @@ def _register_cli(app: Flask) -> None:
         from .security import hash_password
 
         try:
-            parse(
+            data = parse(
                 RegistrationRequest,
                 {
                     "user_id": user_id,
@@ -187,14 +187,14 @@ def _register_cli(app: Flask) -> None:
             raise click.ClickException(str(exc)) from exc
 
         repository = app.extensions["user_repository"]
-        if repository.exists(user_id.lower(), email.lower()):
+        if repository.exists(data.user_id, data.email):
             raise click.ClickException("That username or email already exists.")
 
         repository.create(
-            user_id=user_id.lower(),
-            email=email.lower(),
-            full_name=full_name,
-            password_hash=hash_password(password),
+            user_id=data.user_id,
+            email=data.email,
+            full_name=data.full_name,
+            password_hash=hash_password(data.password),
             is_admin=True,
         )
-        click.echo(f"Created administrator {user_id!r}.")
+        click.echo(f"Created administrator {data.user_id!r}.")

@@ -31,6 +31,9 @@ The web UI is a client of this API. Anything the browser can do, a script can.
 ### Authentication
 
 Session cookie, set by `POST /login` or `POST /register`.
+Login accepts an optional string `next` destination. Same-site paths beginning
+with a single `/` are retained; omitted, non-string or rejected destinations
+fall back to `/dashboard` after valid credentials.
 
 ### CSRF
 

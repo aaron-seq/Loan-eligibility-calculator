@@ -1,11 +1,7 @@
 """Environment-driven configuration.
 
-Design rule: **fail closed in production, be convenient in development.**
-The previous implementation fell back to ``os.urandom(24)`` for the secret key,
-which looks secure but silently breaks every session as soon as a second
-worker (or a second serverless invocation) starts with a different key. Here a
-missing ``SECRET_KEY`` is fatal in production and generates an explicitly
-labelled ephemeral key in development.
+A missing ``SECRET_KEY`` is fatal in production; development uses an ephemeral
+key whose sessions cannot survive restarts or span workers.
 """
 
 from __future__ import annotations
@@ -36,15 +32,8 @@ class ConfigError(RuntimeError):
 def load_env_file(path: Path) -> bool:
     """Load ``KEY=value`` pairs from a ``.env`` file into the environment.
 
-    Called by the process entrypoint (``app.py``), deliberately not from
-    :func:`load_config`: the library reads ``os.environ`` and nothing else, so
-    tests and embedders are never affected by a developer's local file.
-
-    ``override=False`` is the important argument. A real environment variable
-    always wins, so a ``.env`` left lying around can never silently replace a
-    production secret. ``.dockerignore`` also keeps the file out of the image.
-
-    Returns whether a file was found, so callers can log it if they wish.
+    The entrypoint loads the file; ``load_config`` reads only ``os.environ``.
+    Existing environment values win. Returns whether the file was found.
     """
     if not path.is_file():
         return False
@@ -60,12 +49,7 @@ _FALSE = ("0", "false", "no", "off")
 
 
 def _bool(name: str, default: bool) -> bool:
-    """Parse a boolean, refusing anything unrecognised.
-
-    Unrecognised used to mean False, which fails open for
-    ``SESSION_COOKIE_SECURE``: a typo of "true" sent the session cookie over
-    plain HTTP with no sign anything was wrong.
-    """
+    """Reject unknown spellings so security settings cannot fail open on typos."""
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
         return default
@@ -254,8 +238,11 @@ def load_config(env: str | None = None) -> Config:
             "Require 0 < BORDERLINE_THRESHOLD < APPROVE_THRESHOLD < 1; got "
             f"{config.borderline_threshold} and {config.approve_threshold}"
         )
-    if not 0 <= config.annual_interest_rate < 1:
-        raise ConfigError("ANNUAL_INTEREST_RATE is a fraction, e.g. 0.105 for 10.5%")
+    if not (0 <= config.annual_interest_rate < 1 and 0 < config.max_emi_to_income <= 1):
+        raise ConfigError(
+            "Require 0 <= ANNUAL_INTEREST_RATE < 1 and 0 < MAX_EMI_TO_INCOME <= 1; "
+            "use finite fractions, e.g. 0.105 for 10.5%."
+        )
     if config.trusted_proxy_depth < 1:
         raise ConfigError(
             "TRUSTED_PROXY_DEPTH counts proxies in front of the app and must be "

@@ -43,6 +43,5 @@ check: lint typecheck test audit ## Core checks; CI also requires browser, CSS a
 docker: ## Build the production image
 	docker build -t loanwise:latest .
 
-clean:
-	rm -rf .pytest_cache .ruff_cache htmlcov .coverage
-	find . -name __pycache__ -type d -prune -exec rm -rf {} +
+clean: ## Preview ignored root tooling output; inspect paths before removing it
+	git clean -ndX -- .pytest_cache .ruff_cache .mypy_cache htmlcov .coverage

@@ -1,14 +1,11 @@
-.git
-.github
-.venv
-venv
-__pycache__
-*.pyc
-*.db
-.env
-.pytest_cache
-.ruff_cache
-htmlcov
-.coverage
-notebooks
-tests
+# Only Dockerfile inputs enter the context, including on a developer checkout.
+**
+!Dockerfile
+!requirements.txt
+!LICENSE
+!THIRD_PARTY_NOTICES.md
+!app.py
+!loanapp/**/*.py
+!templates/**/*.html
+!static/css/app.css
+!data/train.csv
