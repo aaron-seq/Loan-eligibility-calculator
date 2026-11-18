@@ -2,7 +2,7 @@
 
 pytest==9.2.0
 pytest-cov==7.1.0
-ruff==0.17.3
+ruff==0.17.4
 mypy==2.4.1
 # Fetches Tailwind's standalone binary, so styles build without Node.
 pytailwindcss==0.4.2
